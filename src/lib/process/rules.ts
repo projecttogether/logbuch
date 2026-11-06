@@ -1,0 +1,313 @@
+import { addWorkingDays, isDeadlinePassed } from "@/lib/calendar";
+import type { Reversibility } from "@/lib/entries/constants";
+
+/*
+ * The rules of the decision process as pure functions over
+ * a snapshot of one proposal. Commands load a snapshot, check these rules,
+ * and only then write. The UI uses the same rules to decide what to show.
+ */
+
+export type { Reversibility };
+export type ProposalStatus = "draft" | "feedback" | "objection_round" | "decided" | "rejected" | "withdrawn";
+export type ResponseKind = "question" | "answer" | "feedback" | "go" | "objection";
+export type RequestedRole = "consent_giver" | "feedback_giver";
+
+export interface Periods {
+  feedback: number;
+  objection: number;
+}
+
+/** Minimum periods in working days. Enforced. */
+export const MINIMUM_PERIODS: Record<Reversibility, Periods> = {
+  two_way: { feedback: 1, objection: 1 },
+  one_way: { feedback: 5, objection: 3 },
+};
+
+/** Default periods in working days; admins can change them. */
+export const DEFAULT_PERIODS: Record<Reversibility, Periods> = {
+  two_way: { feedback: 2, objection: 1 },
+  one_way: { feedback: 5, objection: 3 },
+};
+
+export interface SnapshotParticipant {
+  personId: string;
+  role: RequestedRole;
+  hasAccess: boolean;
+}
+
+export interface SnapshotResponse {
+  id: string;
+  personId: string;
+  kind: ResponseKind;
+  versionNumber: number;
+  createdAt: Date;
+  resolvedAt: Date | null;
+  withdrawnAt: Date | null;
+  parentId: string | null;
+}
+
+export interface ProposalSnapshot {
+  status: ProposalStatus;
+  reversibility: Reversibility;
+  proposerId: string;
+  deciderId: string;
+  deciderHasAccess: boolean;
+  /** Date of submission, in the server's time zone. */
+  submittedOn: string | null;
+  feedbackDeadline: string;
+  objectionPeriodDays: number;
+  objectionRoundStartedAt: Date | null;
+  objectionDeadline: string | null;
+  currentVersion: number;
+  /** Gos before this time do not count as one-way consent (set when a proposal becomes one-way). */
+  goResetAt: Date | null;
+  /** Active (not removed) consent and feedback givers. */
+  participants: SnapshotParticipant[];
+  responses: SnapshotResponse[];
+}
+
+export interface Actor {
+  personId: string;
+  isAdmin: boolean;
+}
+
+export interface Check {
+  ok: boolean;
+  reason?: string;
+}
+
+const ok: Check = { ok: true };
+const no = (reason: string): Check => ({ ok: false, reason });
+
+export function isOpen(status: ProposalStatus): boolean {
+  return status === "feedback" || status === "objection_round";
+}
+
+/** Feedback givers and consent givers ("requested people"). */
+export function requestedPeople(s: ProposalSnapshot): string[] {
+  return [...new Set(s.participants.map((p) => p.personId))];
+}
+
+export function consentGivers(s: ProposalSnapshot): SnapshotParticipant[] {
+  return s.reversibility === "one_way" ? s.participants.filter((p) => p.role === "consent_giver") : [];
+}
+
+export function isConsentGiver(s: ProposalSnapshot, personId: string): boolean {
+  return consentGivers(s).some((p) => p.personId === personId);
+}
+
+const active = (r: SnapshotResponse) => r.withdrawnAt === null;
+
+export function hasGivenFeedback(s: ProposalSnapshot, personId: string): boolean {
+  return s.responses.some((r) => r.personId === personId && r.kind === "feedback");
+}
+
+/** A Go or an objection, not withdrawn. */
+export function hasAnswered(s: ProposalSnapshot, personId: string): boolean {
+  return s.responses.some((r) => r.personId === personId && (r.kind === "go" || r.kind === "objection") && active(r));
+}
+
+/** A Go that counts as consent now: on the current version, not withdrawn, given after any reset. */
+function isConsentingGo(s: ProposalSnapshot, r: SnapshotResponse): boolean {
+  return (
+    r.kind === "go" &&
+    active(r) &&
+    r.versionNumber === s.currentVersion &&
+    (s.goResetAt === null || r.createdAt > s.goResetAt)
+  );
+}
+
+/** A Go on the current version (one-way consent is tied to a version). */
+export function hasGoOnCurrentVersion(s: ProposalSnapshot, personId: string): boolean {
+  return s.responses.some((r) => r.personId === personId && isConsentingGo(s, r));
+}
+
+/** An active Go, given after any reset, on a version older than the current one. */
+export function hasGoOnEarlierVersion(s: ProposalSnapshot, personId: string): boolean {
+  return s.responses.some(
+    (r) =>
+      r.personId === personId &&
+      r.kind === "go" &&
+      active(r) &&
+      r.versionNumber < s.currentVersion &&
+      (s.goResetAt === null || r.createdAt > s.goResetAt),
+  );
+}
+
+/** Objections that are not withdrawn, not resolved, and not followed by the objector's Go on the current version. */
+export function openObjections(s: ProposalSnapshot): SnapshotResponse[] {
+  return s.responses.filter(
+    (objection) =>
+      objection.kind === "objection" &&
+      active(objection) &&
+      objection.resolvedAt === null &&
+      !s.responses.some(
+        (go) => go.personId === objection.personId && isConsentingGo(s, go) && go.createdAt > objection.createdAt,
+      ),
+  );
+}
+
+/** Open objections from consent givers block a one-way decision. */
+export function blockingObjections(s: ProposalSnapshot): SnapshotResponse[] {
+  return openObjections(s).filter((objection) => isConsentGiver(s, objection.personId));
+}
+
+/** Unanswered questions to the proposer. */
+export function openQuestions(s: ProposalSnapshot): SnapshotResponse[] {
+  return s.responses.filter(
+    (question) => question.kind === "question" && !s.responses.some((r) => r.kind === "answer" && r.parentId === question.id),
+  );
+}
+
+/**
+ * A requested person who still owes an answer in the current phase: feedback
+ * in the feedback phase; in the objection round a Go or an objection (two-way),
+ * or a Go on the current version unless their own objection is open (one-way
+ * consent givers). Used by My tasks and the reminders.
+ */
+export function awaitsAnswer(s: ProposalSnapshot, personId: string): boolean {
+  if (!s.participants.some((p) => p.personId === personId)) return false;
+  if (s.status === "feedback") return !hasGivenFeedback(s, personId);
+  if (s.status !== "objection_round") return false;
+  if (s.reversibility === "two_way") return !hasAnswered(s, personId);
+  return (
+    isConsentGiver(s, personId) &&
+    !hasGoOnCurrentVersion(s, personId) &&
+    !openObjections(s).some((r) => r.personId === personId)
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Transitions
+// ---------------------------------------------------------------------------
+
+/** Start of the objection round. */
+export function canStartObjectionRound(s: ProposalSnapshot, now: Date): Check {
+  if (s.status !== "feedback") return no("The proposal is not in the feedback phase.");
+  if (isDeadlinePassed(s.feedbackDeadline, now)) return ok;
+  if (s.reversibility === "one_way") return no("A one-way proposal moves to the objection round after the feedback deadline.");
+  const requested = requestedPeople(s);
+  if (requested.length === 0) return no("Without requested people, the objection round starts after the feedback deadline.");
+  if (requested.every((personId) => hasGivenFeedback(s, personId))) return ok;
+  return no("The objection round starts after the feedback deadline, or once everyone asked has given feedback.");
+}
+
+export interface Criterion {
+  key: string;
+  label: string;
+  ok: boolean;
+}
+
+/** Publish criteria. `ready_to_decide` is derived, never stored. */
+export function readiness(s: ProposalSnapshot, now: Date): { ready: boolean; criteria: Criterion[] } {
+  const started = s.status === "objection_round";
+  const deadlinePassed = s.objectionDeadline !== null && isDeadlinePassed(s.objectionDeadline, now);
+  const criteria: Criterion[] = [{ key: "started", label: "The objection round has started", ok: started }];
+
+  if (s.reversibility === "two_way") {
+    const requested = requestedPeople(s);
+    const answered = requested.filter((personId) => hasAnswered(s, personId)).length;
+    const allAnswered = requested.length > 0 && answered === requested.length;
+    criteria.push({
+      key: "deadline_or_answers",
+      label:
+        requested.length > 0
+          ? `The objection deadline has passed, or everyone asked has answered (${answered} of ${requested.length})`
+          : "The objection deadline has passed",
+      ok: started && (deadlinePassed || allAnswered),
+    });
+  } else {
+    const givers = consentGivers(s);
+    const withGo = givers.filter((p) => hasGoOnCurrentVersion(s, p.personId)).length;
+    criteria.push(
+      { key: "deadline", label: "The objection period is over", ok: started && deadlinePassed },
+      {
+        key: "consent",
+        label: `Every consent giver gave a Go on version ${s.currentVersion} (${withGo} of ${givers.length})`,
+        ok: givers.length > 0 && withGo === givers.length,
+      },
+      { key: "no_blocking_objection", label: "No open objection from a consent giver", ok: blockingObjections(s).length === 0 },
+      { key: "consent_access", label: "Every consent giver has access", ok: givers.every((p) => p.hasAccess) },
+    );
+  }
+  criteria.push({ key: "decider_access", label: "The decider has access", ok: s.deciderHasAccess });
+  return { ready: criteria.every((c) => c.ok), criteria };
+}
+
+/** Two-way: objections are allowed at publish time, but the decider explains how they were addressed. */
+export function objectionHandlingRequired(s: ProposalSnapshot): boolean {
+  return s.reversibility === "two_way" && s.responses.some((r) => r.kind === "objection" && active(r));
+}
+
+/** The earliest allowed feedback deadline for a proposal submitted on `submittedOn`. */
+export function minimumFeedbackDeadline(type: Reversibility, submittedOn: string): string {
+  return addWorkingDays(submittedOn, MINIMUM_PERIODS[type].feedback);
+}
+
+export function defaultFeedbackDeadline(type: Reversibility, periods: Record<Reversibility, Periods>, today: string): string {
+  return addWorkingDays(today, Math.max(periods[type].feedback, MINIMUM_PERIODS[type].feedback));
+}
+
+// ---------------------------------------------------------------------------
+// Permissions
+// ---------------------------------------------------------------------------
+
+export interface Permissions {
+  editDraft: boolean;
+  submit: boolean;
+  newVersion: boolean;
+  startObjectionRound: Check;
+  ask: boolean;
+  answer: boolean;
+  giveFeedback: boolean;
+  object: boolean;
+  go: boolean;
+  withdrawGo: boolean;
+  extendFeedbackDeadline: boolean;
+  extendObjectionDeadline: boolean;
+  changeReversibility: boolean;
+  manageParticipants: boolean;
+  removeConsentGiverInObjectionRound: boolean;
+  changeDecider: boolean;
+  adminOverride: boolean;
+  publish: boolean;
+  reject: boolean;
+  withdraw: boolean;
+}
+
+/** What `actor` may do on this proposal now. Commands check the same rules again. */
+export function permissions(s: ProposalSnapshot, actor: Actor, now: Date): Permissions {
+  const isProposer = actor.personId === s.proposerId;
+  const isDecider = actor.personId === s.deciderId;
+  const open = isOpen(s.status);
+  const isRequested = requestedPeople(s).includes(actor.personId);
+  const mayGo = s.reversibility === "one_way" ? isConsentGiver(s, actor.personId) : isRequested;
+  const goGiven =
+    s.reversibility === "one_way"
+      ? hasGoOnCurrentVersion(s, actor.personId)
+      : s.responses.some((r) => r.personId === actor.personId && r.kind === "go" && active(r));
+  const objectionRound = s.status === "objection_round";
+
+  return {
+    editDraft: s.status === "draft" && isProposer,
+    submit: s.status === "draft" && isProposer,
+    newVersion: open && isProposer,
+    startObjectionRound: isProposer ? canStartObjectionRound(s, now) : no("Only the proposer starts the objection round."),
+    ask: open,
+    answer: open && isProposer,
+    giveFeedback: s.status === "feedback",
+    object: objectionRound,
+    go: objectionRound && mayGo && !goGiven,
+    withdrawGo: objectionRound && goGiven,
+    extendFeedbackDeadline: s.status === "feedback" && isProposer,
+    extendObjectionDeadline: objectionRound && isProposer,
+    changeReversibility: isProposer && open && (s.reversibility === "two_way" || s.status === "feedback"),
+    manageParticipants: isProposer && open,
+    removeConsentGiverInObjectionRound: objectionRound && isDecider && s.reversibility === "one_way",
+    changeDecider: (isProposer && s.status === "feedback") || (actor.isAdmin && open),
+    adminOverride: actor.isAdmin && open,
+    publish: isDecider && readiness(s, now).ready,
+    reject: isDecider && open,
+    withdraw: isProposer && open,
+  };
+}

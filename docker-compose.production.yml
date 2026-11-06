@@ -1,0 +1,108 @@
+# Logbuch in production: one image, three services, and PostgreSQL 18.
+#
+#   cp .env.example .env    # then set the production values, see docs/configuration.md
+#   docker compose -f docker-compose.production.yml up -d --build
+#
+# Put a TLS-terminating reverse proxy in front of `web` (port 3000) and set
+# LOGBUCH_BASE_URL to its public URL. `migrate` runs once before `web` and
+# `worker` start. Platforms that run Compose files (e.g. Coolify, Portainer)
+# can use this file as it is; set the variables in their environment view.
+
+x-app-environment: &app-environment
+  # With an external database, put its URL here and remove the postgres service.
+  DATABASE_URL: postgres://logbuch:${POSTGRES_PASSWORD:?}@postgres:5432/logbuch
+  TZ: ${TZ:-UTC}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+
+x-directory-environment: &directory-environment
+  LOGBUCH_BASE_URL: ${LOGBUCH_BASE_URL:?}
+  OIDC_ISSUER: ${OIDC_ISSUER:?}
+  OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?}
+  OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?}
+  DIRECTORY: ${DIRECTORY:-manual}
+  INITIAL_ADMIN_EMAILS: ${INITIAL_ADMIN_EMAILS:-}
+  KEYCLOAK_ACCESS_GROUP: ${KEYCLOAK_ACCESS_GROUP:-}
+  KEYCLOAK_ADMIN_GROUP: ${KEYCLOAK_ADMIN_GROUP:-}
+  KEYCLOAK_TEAMS_GROUP: ${KEYCLOAK_TEAMS_GROUP:-}
+  KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-}
+  KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-}
+
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: logbuch
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: logbuch
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U logbuch -d logbuch"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build: .
+    command: ["migrate"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *app-environment
+
+  web:
+    build: .
+    command: ["web"]
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      <<: [*app-environment, *directory-environment]
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?}
+      OIDC_SCOPES: ${OIDC_SCOPES:-}
+    healthcheck:
+      # Readiness: database reachable and migrations applied.
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/-/readyz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  worker:
+    build: .
+    command: ["worker"]
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: [*app-environment, *directory-environment]
+      # Each channel is off until it is configured.
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_CHANNEL_ID: ${SLACK_CHANNEL_ID:-}
+      SMTP_URL: ${SMTP_URL:-}
+      MAILERSEND_API_TOKEN: ${MAILERSEND_API_TOKEN:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME:-}
+      WEBHOOK_URL: ${WEBHOOK_URL:-}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+    healthcheck:
+      # The worker refreshes its heartbeat file every 30 seconds.
+      test: ["CMD", "node", "dist/worker-healthcheck.mjs"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  postgres-data:
