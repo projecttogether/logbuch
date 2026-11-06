@@ -8,13 +8,16 @@ welcome.
 Requirements: Node.js 26, npm, and Docker.
 
 ```sh
-docker compose up -d       # PostgreSQL 18 (port 55432) and Keycloak (port 8090)
+docker compose -f compose.dev.yaml up -d   # PostgreSQL 18 (port 55432) and Keycloak (port 8090)
 cp .env.example .env.local
 npm ci
 npm run db:migrate
-npm run dev                # http://localhost:3000
-npm run worker             # in a second terminal
+npm run dev                                # http://localhost:3000
+npm run worker                             # in a second terminal
 ```
+
+`compose.yaml` is the production setup. To leave out `-f compose.dev.yaml` in
+every Compose command, `export COMPOSE_FILE=compose.dev.yaml` in your shell.
 
 Test users in the development Keycloak (password `logbuch-dev`): `erika`
 (has access), `adam` (admin), and `olga` (no access). The Keycloak admin
@@ -26,7 +29,7 @@ console is at http://localhost:8090 (`admin` / `admin`).
 npm run lint
 npm run typecheck
 npm test                   # unit tests
-npm run test:integration   # against the PostgreSQL from docker compose
+npm run test:integration   # against the PostgreSQL from compose.dev.yaml
 npm run build
 ```
 

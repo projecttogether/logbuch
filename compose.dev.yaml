@@ -1,6 +1,7 @@
 # Local development: PostgreSQL 18 and a Keycloak with a development realm.
-#   docker compose up -d
+#   docker compose -f compose.dev.yaml up -d
 # Keycloak: http://localhost:8090 (admin / admin), realm "logbuch".
+# The production setup is compose.yaml.
 name: logbuch-dev
 
 services:

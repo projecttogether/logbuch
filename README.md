@@ -28,18 +28,21 @@ meetings.
 Requirements: Node.js 26, npm, and Docker.
 
 ```sh
-docker compose up -d       # PostgreSQL 18 and a Keycloak with test users
+docker compose -f compose.dev.yaml up -d   # PostgreSQL 18 and a Keycloak with test users
 cp .env.example .env.local
 npm ci
 npm run db:migrate
-npm run dev                # http://localhost:3000
-npm run worker             # in a second terminal: notifications and directory sync
+npm run dev                                # http://localhost:3000
+npm run worker                             # in a second terminal: notifications and directory sync
 ```
 
 Sign in as `erika` (has access), `adam` (admin), or `olga` (no access), each
 with the password `logbuch-dev`. The development setup reads people and teams
 from Keycloak groups; see [`.env.example`](.env.example) to try the manual
 directory instead.
+
+`compose.yaml` is the production setup, so a plain `docker compose up` runs
+Logbuch itself; see [Deployment](docs/deployment.md).
 
 ## Documentation
 

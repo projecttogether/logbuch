@@ -1,12 +1,13 @@
 # Logbuch in production: one image, three services, and PostgreSQL 18.
 #
 #   cp .env.example .env    # then set the production values, see docs/configuration.md
-#   docker compose -f docker-compose.production.yml up -d --build
+#   docker compose up -d --build
 #
 # Put a TLS-terminating reverse proxy in front of `web` (port 3000) and set
 # LOGBUCH_BASE_URL to its public URL. `migrate` runs once before `web` and
 # `worker` start. Platforms that run Compose files (e.g. Coolify, Portainer)
 # can use this file as it is; set the variables in their environment view.
+# Local development uses compose.dev.yaml.
 
 x-app-environment: &app-environment
   # With an external database, put its URL here and remove the postgres service.

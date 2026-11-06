@@ -5,7 +5,7 @@ import { Client, Pool } from "pg";
 
 /**
  * Recreates the test database and applies all migrations, once per run.
- * TEST_DATABASE_URL defaults to the database of `docker compose up -d`.
+ * TEST_DATABASE_URL defaults to the PostgreSQL of compose.dev.yaml.
  */
 export default async function setup() {
   const url = new URL(
