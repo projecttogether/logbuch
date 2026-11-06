@@ -1,7 +1,11 @@
-# Logbuch in production: one image, three services, and PostgreSQL 18.
+# Logbuch in production: one image, three services, and the PostgreSQL 18 in
+# DATABASE_URL.
 #
 #   cp .env.example .env    # then set the production values, see docs/configuration.md
 #   docker compose up -d --build
+#
+# Without a PostgreSQL of your own, add compose.postgres.yaml: it runs one
+# next to Logbuch (docs/deployment.md).
 #
 # Put a TLS-terminating reverse proxy in front of `web` (port 3000) and set
 # LOGBUCH_BASE_URL to its public URL. `migrate` runs once before `web` and
@@ -10,8 +14,7 @@
 # Local development uses compose.dev.yaml.
 
 x-app-environment: &app-environment
-  # With an external database, put its URL here and remove the postgres service.
-  DATABASE_URL: postgres://logbuch:${POSTGRES_PASSWORD:?}@postgres:5432/logbuch
+  DATABASE_URL: ${DATABASE_URL:?}
   TZ: ${TZ:-UTC}
   LOG_LEVEL: ${LOG_LEVEL:-info}
 
@@ -29,28 +32,10 @@ x-directory-environment: &directory-environment
   KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-}
 
 services:
-  postgres:
-    image: postgres:18
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: logbuch
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
-      POSTGRES_DB: logbuch
-    volumes:
-      - postgres-data:/var/lib/postgresql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U logbuch -d logbuch"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-
   migrate:
     build: .
     command: ["migrate"]
     restart: "no"
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
       <<: *app-environment
 
@@ -105,6 +90,3 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
-
-volumes:
-  postgres-data:
