@@ -3,6 +3,7 @@ import {
   ConfigError,
   parseAuthConfig,
   parseDirectoryConfig,
+  parseErrorReportingConfig,
   parseNotificationConfig,
   parseWebhookConfig,
   validateWebConfig,
@@ -184,5 +185,16 @@ describe("parseWebhookConfig", () => {
     expect(parseWebhookConfig({ WEBHOOK_URL: "https://hooks.example.org/logbuch", WEBHOOK_SECRET: "s".repeat(32) }).WEBHOOK_URL).toBe(
       "https://hooks.example.org/logbuch",
     );
+  });
+});
+
+describe("parseErrorReportingConfig", () => {
+  it("is off without a DSN and rejects a DSN that is not a URL", () => {
+    expect(parseErrorReportingConfig({ SENTRY_DSN: " " }).SENTRY_DSN).toBeUndefined();
+    expect(parseErrorReportingConfig({ SENTRY_DSN: "https://key@o1.ingest.example.org/2" }).SENTRY_DSN).toBe(
+      "https://key@o1.ingest.example.org/2",
+    );
+    expect(() => parseErrorReportingConfig({ SENTRY_DSN: "key@o1" })).toThrow(/SENTRY_DSN/);
+    expect(() => validateWorkerConfig({ SENTRY_DSN: "key@o1" })).toThrow(/SENTRY_DSN/);
   });
 });

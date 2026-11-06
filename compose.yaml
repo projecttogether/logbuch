@@ -31,6 +31,12 @@ x-directory-environment: &directory-environment
   KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-}
   KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-}
 
+# Error reporting to Sentry; off without SENTRY_DSN.
+x-error-reporting-environment: &error-reporting-environment
+  SENTRY_DSN: ${SENTRY_DSN:-}
+  SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-}
+  SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+
 services:
   migrate:
     build: .
@@ -49,7 +55,7 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     environment:
-      <<: [*app-environment, *directory-environment]
+      <<: [*app-environment, *directory-environment, *error-reporting-environment]
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?}
       OIDC_SCOPES: ${OIDC_SCOPES:-}
       OIDC_TRUST_EMAIL: ${OIDC_TRUST_EMAIL:-}
@@ -73,7 +79,7 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      <<: [*app-environment, *directory-environment]
+      <<: [*app-environment, *directory-environment, *error-reporting-environment]
       # Each channel is off until it is configured.
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
       SLACK_CHANNEL_ID: ${SLACK_CHANNEL_ID:-}

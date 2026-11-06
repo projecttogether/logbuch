@@ -23,6 +23,8 @@
     "import:entries": "LOGBUCH_PROCESS=import-entries tsx --env-file-if-exists=.env.local src/scripts/import-entries.ts"
   },
   "dependencies": {
+    "@sentry/nextjs": "^11.11.0",
+    "@sentry/node": "^11.11.0",
     "better-auth": "^1.7.16",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
