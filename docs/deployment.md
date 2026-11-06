@@ -27,7 +27,12 @@ docker compose up -d --build
 ```
 
 On a platform that runs Compose files, create the PostgreSQL there and set
-`DATABASE_URL` to its internal URL.
+`DATABASE_URL` to its internal URL. Coolify starts each Compose project in a
+network of its own, where that host name does not resolve (`migrate` logs
+`getaddrinfo EAI_AGAIN` and fails after a minute): turn on **Connect To
+Predefined Network** in the application's advanced settings. Coolify passes its
+one Compose file with `-f`, which overrides `COMPOSE_FILE`, so
+`compose.postgres.yaml` does not work there.
 
 Put a reverse proxy that terminates TLS in front of `web` and use its public
 URL as `LOGBUCH_BASE_URL`. Use exactly that URL: login redirects and links in
