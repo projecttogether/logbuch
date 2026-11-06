@@ -109,7 +109,7 @@ export async function deliveries(ref: string): Promise<Delivery[]> {
   }
 }
 
-/** The development Keycloak, administered with its bootstrap admin (docker-compose.yml). */
+/** The development Keycloak, administered with its bootstrap admin (compose.dev.yaml). */
 const KEYCLOAK_URL = process.env.E2E_KEYCLOAK_URL ?? "http://localhost:8090";
 
 async function keycloakAdmin(path: string, init: RequestInit = {}): Promise<Response> {

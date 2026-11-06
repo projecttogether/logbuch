@@ -90,19 +90,22 @@ with shadcn/ui (Radix), pino, Vitest, Playwright.
 ## Commands
 
 ```sh
-docker compose up -d            # PostgreSQL 18 (port 55432) and Keycloak (port 8090)
+docker compose -f compose.dev.yaml up -d   # PostgreSQL 18 (port 55432) and Keycloak (port 8090)
 cp .env.example .env.local
 npm ci
 npm run db:migrate
-npm run dev                     # http://localhost:3000, users erika / adam / olga, password logbuch-dev
-npm run worker                  # pg-boss worker in a second terminal
+npm run dev                                # http://localhost:3000, users erika / adam / olga, password logbuch-dev
+npm run worker                             # pg-boss worker in a second terminal
 
 npm run lint
 npm run typecheck
-npm test                        # unit tests
-npm run test:integration        # needs the PostgreSQL from docker compose
-npm run build                   # Next.js standalone build and dist/ bundles
+npm test                                   # unit tests
+npm run test:integration                   # needs the PostgreSQL from compose.dev.yaml
+npm run build                              # Next.js standalone build and dist/ bundles
 ```
+
+`compose.yaml` is the production setup, so every Compose command for the
+development services needs `-f compose.dev.yaml`.
 
 End-to-end tests run against production builds, Keycloak, and PostgreSQL:
 one instance with the Keycloak directory (port 3000) and one with the manual
@@ -116,7 +119,7 @@ export BETTER_AUTH_SECRET="$(openssl rand -base64 32)" NODE_ENV=production TZ=Eu
 node dist/migrate.mjs
 node .next/standalone/server.js &
 node dist/worker.mjs &
-docker compose exec postgres psql -U logbuch -c "drop database if exists logbuch_manual with (force)" -c "create database logbuch_manual"
+docker compose -f compose.dev.yaml exec postgres psql -U logbuch -c "drop database if exists logbuch_manual with (force)" -c "create database logbuch_manual"
 DATABASE_URL=postgres://logbuch:logbuch@localhost:55432/logbuch_manual DIRECTORY=manual \
   INITIAL_ADMIN_EMAILS=adam@example.test LOGBUCH_BASE_URL=http://localhost:3001 PORT=3001 \
   sh -c 'node dist/migrate.mjs && node .next/standalone/server.js' &

@@ -133,7 +133,8 @@ accounts on, give it the `view-users` role, and set `KEYCLOAK_CLIENT_ID` and
 `KEYCLOAK_CLIENT_SECRET` to it.
 
 [`dev/keycloak/logbuch-realm.json`](../dev/keycloak/logbuch-realm.json) is a
-complete example realm, used by `docker compose up` and the end-to-end tests.
+complete example realm, used by the development setup (`compose.dev.yaml`)
+and the end-to-end tests.
 
 ## Switching directories
 

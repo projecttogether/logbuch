@@ -14,22 +14,22 @@ the `pgboss` schema of the same database.
 
 ## Docker Compose
 
-[`docker-compose.production.yml`](../docker-compose.production.yml) runs
-PostgreSQL, `migrate`, `web`, and `worker`:
+[`compose.yaml`](../compose.yaml) runs PostgreSQL, `migrate`, `web`, and
+`worker`:
 
 ```sh
 cp .env.example .env
 # Edit .env with the production values (docs/configuration.md): at least
 # POSTGRES_PASSWORD, LOGBUCH_BASE_URL, BETTER_AUTH_SECRET, the OIDC_* variables,
-# and DIRECTORY with its settings. Remove DATABASE_URL (the compose file sets
+# and DIRECTORY with its settings. Remove DATABASE_URL (compose.yaml sets
 # it) and NOTIFICATION_TRANSPORT (production sends for real).
-docker compose -f docker-compose.production.yml up -d --build
+docker compose up -d --build
 ```
 
 Put a reverse proxy that terminates TLS in front of `web` and use its public
 URL as `LOGBUCH_BASE_URL`. Use exactly that URL: login redirects and links in
 messages are built from it. With an external database, change `DATABASE_URL`
-in the compose file and remove the `postgres` service.
+in `compose.yaml` and remove the `postgres` service.
 
 Set `TZ` to your organization's time zone (default UTC): deadlines end at
 23:59, and reminders go out at 09:00, in that zone.
