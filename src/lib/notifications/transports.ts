@@ -157,7 +157,9 @@ export function createSmtpTransport(
   options: { url: string; from: string; fromName: string },
   createTransport: typeof nodemailer.createTransport = nodemailer.createTransport,
 ): EmailTransport {
-  const transporter = createTransport(options.url, {
+  // The URL sets host, port, TLS, and credentials; the timeouts apply on top.
+  const transporter = createTransport({
+    url: options.url,
     connectionTimeout: TIMEOUT_MS,
     greetingTimeout: TIMEOUT_MS,
     socketTimeout: TIMEOUT_MS,

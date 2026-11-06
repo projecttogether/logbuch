@@ -139,9 +139,9 @@ describe("SMTP", () => {
   const email = { to: "ana@example.org", toName: "Ana", subject: "S", text: "T", html: "<p>T</p>" };
 
   function fakeNodemailer(sendMail: (message: unknown) => Promise<unknown>) {
-    const created: { url: unknown; options: unknown }[] = [];
-    const createTransport = ((url: unknown, options: unknown) => {
-      created.push({ url, options });
+    const created: unknown[] = [];
+    const createTransport = ((options: unknown) => {
+      created.push(options);
       return { sendMail };
     }) as unknown as Parameters<typeof createSmtpTransport>[1];
     return { createTransport, created };
@@ -151,7 +151,12 @@ describe("SMTP", () => {
     const sendMail = vi.fn(async () => ({ messageId: "1" }));
     const { createTransport, created } = fakeNodemailer(sendMail);
     await createSmtpTransport({ url: "smtps://user:pass@mail.example.org:465", from: "logbuch@example.org", fromName: "Logbuch" }, createTransport).send(email);
-    expect(created[0]!.url).toBe("smtps://user:pass@mail.example.org:465");
+    expect(created[0]).toEqual({
+      url: "smtps://user:pass@mail.example.org:465",
+      connectionTimeout: 15_000,
+      greetingTimeout: 15_000,
+      socketTimeout: 15_000,
+    });
     expect(sendMail).toHaveBeenCalledWith({
       from: { name: "Logbuch", address: "logbuch@example.org" },
       to: { name: "Ana", address: "ana@example.org" },
