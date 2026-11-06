@@ -89,3 +89,9 @@ export async function listTeams(db: Database) {
     .from(team)
     .orderBy(desc(team.isActive), sql`lower(${team.name})`);
 }
+
+/** Whether any team can own an entry. Without one, nobody can create entries. */
+export async function hasActiveTeam(db: Database): Promise<boolean> {
+  const [row] = await db.select({ id: team.id }).from(team).where(eq(team.isActive, true)).limit(1);
+  return row !== undefined;
+}

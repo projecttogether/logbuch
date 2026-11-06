@@ -171,6 +171,14 @@ describe("syncDirectory", () => {
     ]);
   });
 
+  it("keeps people and teams when the directory returns no teams", async () => {
+    await sync(adapterReturning(snapshot([directoryPerson({ externalId: "p1" })])));
+    const result = await sync(adapterReturning(snapshot([directoryPerson({ externalId: "p1" }), directoryPerson({ externalId: "p2" })], [])));
+    expect(result).toMatchObject({ status: "failed", error: expect.stringMatching(/no teams/) });
+    expect([...(await people()).keys()]).toEqual(["p1"]);
+    expect((await db.select().from(team)).every((t) => t.isActive)).toBe(true);
+  });
+
   it("keeps the last projection when the directory cannot be reached", async () => {
     await sync(adapterReturning(snapshot([directoryPerson({ externalId: "p1" })])));
     const result = await sync(failingAdapter);

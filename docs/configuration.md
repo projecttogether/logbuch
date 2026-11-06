@@ -24,6 +24,7 @@ variable.
 | Variable | Default | Value |
 |---|---|---|
 | `OIDC_SCOPES` | `openid profile email` | Scopes requested at login, separated by spaces |
+| `OIDC_TRUST_EMAIL` | `false` | `true` treats every email address from the provider as verified. Only for providers that do not send `email_verified` (e.g. Microsoft Entra ID) and whose users cannot choose their own address |
 
 See [identity and access](identity-and-access.md) for the redirect URI and
 provider-specific notes.
@@ -38,15 +39,18 @@ With `DIRECTORY=manual`:
 
 | Variable | Default | Value |
 |---|---|---|
-| `INITIAL_ADMIN_EMAILS` | none | Email addresses, separated by commas. While Logbuch has no admin, the first login with one of them (verified by the provider) becomes an admin |
+| `INITIAL_ADMIN_EMAILS` | required | Email addresses, separated by commas. While Logbuch has no admin, the first login with one of them (verified by the provider) becomes an admin. Without it, nobody could ever get in; afterwards it has no effect |
 
-With `DIRECTORY=keycloak` (needed by web and worker):
+With `DIRECTORY=keycloak` (needed by web and worker). All three groups are
+required: every entry belongs to a team, and only admins manage tags and
+unblock stuck proposals. Write group paths with a leading slash and without a
+trailing one.
 
 | Variable | Default | Value |
 |---|---|---|
 | `KEYCLOAK_ACCESS_GROUP` | required | Group path, e.g. `/logbuch`. Its members, and members of its subgroups, have access |
-| `KEYCLOAK_ADMIN_GROUP` | none | Group path. Its members are admins (and have access) |
-| `KEYCLOAK_TEAMS_GROUP` | none | Group path. Each direct subgroup is a team |
+| `KEYCLOAK_ADMIN_GROUP` | required | Group path, e.g. `/logbuch-admins`. Its members are admins (and have access) |
+| `KEYCLOAK_TEAMS_GROUP` | required | Group path, e.g. `/teams`. Each direct subgroup is a team; it needs at least one |
 | `KEYCLOAK_CLIENT_ID` | `OIDC_CLIENT_ID` | Client with a service account that may read users and groups |
 | `KEYCLOAK_CLIENT_SECRET` | `OIDC_CLIENT_SECRET` | Its secret |
 
@@ -55,8 +59,10 @@ derived from it.
 
 ## Notifications (worker)
 
-Slack and email are each optional. Without Slack, event messages go by email;
-without either, Logbuch only shows tasks in the app.
+Slack and email are each optional. Events prefer Slack and reminders prefer
+email; when one is off, or cannot reach a person (no Slack account, no email
+address), the message goes out on the other. Without either, Logbuch only
+shows tasks in the app.
 
 | Variable | Default | Value |
 |---|---|---|

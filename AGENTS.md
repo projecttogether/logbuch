@@ -52,8 +52,8 @@ with shadcn/ui (Radix), pino, Vitest, Playwright.
   which message is planned by pure functions in `src/lib/notifications/plan.ts`
   (tested); each delivery key names the event, the occurrence, and the
   recipient, so nothing is recorded twice. Only the worker sends
-  (`dispatch.ts`): Slack for events (email when Slack is off or the person has
-  no Slack account), email for reminders. Never put the proposal text in a
+  (`dispatch.ts`): Slack for events and email for reminders, each falling back
+  to the other channel when it is off or cannot reach the person. Never put the proposal text in a
   message. Messages carry dates as tokens (`dateToken`), written in each
   recipient's date format when sent.
 - A command that publishes, edits, decides, supersedes, changes the impact
@@ -64,7 +64,10 @@ with shadcn/ui (Radix), pino, Vitest, Playwright.
   (`src/lib/directory/manage.ts`, invitations linked at the first login in
   `src/lib/auth/access.ts`) or the Keycloak sync (`keycloak-adapter.ts`,
   `sync.ts`). Link logins by the OIDC `sub`; match an email only once, and
-  only when the provider verified it.
+  only when the provider verified it (or `OIDC_TRUST_EMAIL` is set). Settings
+  without which the app cannot be used (the first admins, the Keycloak
+  groups) are required in `config.ts`, so a deployment fails at startup
+  instead of later.
 - Deadlines, working days (Monday to Friday), reminders, and statistics use
   the server's time zone (`serverDate`, `serverDateTime` in `src/lib/format.ts`).
   Everything shown to a person uses their preferences: `getFormatter()` in

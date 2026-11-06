@@ -17,6 +17,8 @@ const KEYCLOAK: DirectoryConfig = {
   KEYCLOAK_CLIENT_ID: "logbuch",
   KEYCLOAK_CLIENT_SECRET: "secret",
   KEYCLOAK_ACCESS_GROUP: "/logbuch",
+  KEYCLOAK_ADMIN_GROUP: "/logbuch-admins",
+  KEYCLOAK_TEAMS_GROUP: "/teams",
 };
 const manual = (initialAdmins: string[] = []): DirectoryConfig => ({ DIRECTORY: "manual", INITIAL_ADMIN_EMAILS: initialAdmins });
 
@@ -112,6 +114,14 @@ describe("hasLoginAccess with the manual directory", () => {
     await expect(hasLoginAccess(db, userId, options())).resolves.toBe(false);
     const [row] = await db.select().from(person);
     expect(row?.oidcSubject).toBeNull();
+  });
+
+  it("links an unverified email when the provider's addresses are trusted (OIDC_TRUST_EMAIL)", async () => {
+    const invited = await invite("erika@example.org");
+    const userId = await oidcUser("sub-erika", { email: "erika@example.org", emailVerified: false });
+    await expect(hasLoginAccess(db, userId, { ...options(), trustEmail: true })).resolves.toBe(true);
+    const [linked] = await db.select().from(person).where(eq(person.id, invited.id));
+    expect(linked?.oidcSubject).toBe("sub-erika");
   });
 
   it("denies someone who was not invited, and an invitation whose access was taken away", async () => {

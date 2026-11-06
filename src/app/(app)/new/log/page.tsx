@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { logEntryAction } from "@/app/(app)/entry-actions";
 import { LogForm } from "@/components/entries/log-form";
+import { NoTeamsNotice } from "@/components/entries/no-teams-notice";
 import { PageHeader } from "@/components/page-header";
 import { requireUser } from "@/lib/auth/session";
+import { getDirectoryConfig } from "@/lib/config";
 import { getDb } from "@/lib/db/client";
 import { ENTRY_TYPES } from "@/lib/entries/constants";
 import { getFormOptions } from "@/lib/entries/queries";
@@ -22,13 +24,17 @@ export default async function LogPage({ searchParams }: PageProps<"/new/log">) {
         title="Log something"
         description="Published right away. Updates and learnings can be corrected later; a decision is not edited, corrections are added as addenda."
       />
-      <LogForm
-        action={logEntryAction}
-        options={options}
-        types={[...ENTRY_TYPES]}
-        today={serverDate()}
-        defaults={{ type, teamId: person.teamId ?? undefined, deciderId: person.id }}
-      />
+      {options.teams.length === 0 ? (
+        <NoTeamsNotice isAdmin={person.isAdmin} manual={getDirectoryConfig().DIRECTORY === "manual"} />
+      ) : (
+        <LogForm
+          action={logEntryAction}
+          options={options}
+          types={[...ENTRY_TYPES]}
+          today={serverDate()}
+          defaults={{ type, teamId: person.teamId ?? undefined, deciderId: person.id }}
+        />
+      )}
     </div>
   );
 }

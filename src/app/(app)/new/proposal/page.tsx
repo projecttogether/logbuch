@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { saveDraftAction } from "@/app/(app)/proposal-actions";
+import { NoTeamsNotice } from "@/components/entries/no-teams-notice";
 import { ProposalForm } from "@/components/proposals/proposal-form";
 import { PageHeader } from "@/components/page-header";
 import { getFormatter, requireUser } from "@/lib/auth/session";
+import { getDirectoryConfig } from "@/lib/config";
 import { getDb } from "@/lib/db/client";
 import { getFormOptions } from "@/lib/entries/queries";
 import { DEADLINE_END } from "@/lib/format";
@@ -17,15 +19,19 @@ export default async function NewProposalPage() {
   return (
     <div className="flex max-w-3xl flex-col gap-6">
       <PageHeader title="New proposal" description="A question for the decision process. It stays a private draft until you submit it." />
-      <ProposalForm
-        action={saveDraftAction.bind(null, null)}
-        options={options}
-        periodDefaults={periods}
-        proposerId={person.id}
-        defaults={{ teamId: person.teamId ?? undefined, deciderId: person.id }}
-        dateFormat={(await getFormatter()).dateFormat}
-        deadlineEnd={DEADLINE_END}
-      />
+      {options.teams.length === 0 ? (
+        <NoTeamsNotice isAdmin={person.isAdmin} manual={getDirectoryConfig().DIRECTORY === "manual"} />
+      ) : (
+        <ProposalForm
+          action={saveDraftAction.bind(null, null)}
+          options={options}
+          periodDefaults={periods}
+          proposerId={person.id}
+          defaults={{ teamId: person.teamId ?? undefined, deciderId: person.id }}
+          dateFormat={(await getFormatter()).dateFormat}
+          deadlineEnd={DEADLINE_END}
+        />
+      )}
     </div>
   );
 }

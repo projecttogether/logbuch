@@ -43,12 +43,20 @@ The provider must send the `email` claim, and `email_verified` must be true
 for invitations and `INITIAL_ADMIN_EMAILS` to match. A login is linked to a
 person by the OIDC subject (`sub`) after that.
 
+Some providers never send `email_verified=true`: Microsoft Entra ID does not
+send the claim, and Authentik depends on its scope mapping. If your users
+cannot choose their own email address at the provider (it is managed by your
+organization), set `OIDC_TRUST_EMAIL=true`. Do not set it for providers where
+people sign up themselves or edit their address, since an invitation would
+then go to whoever enters that address first.
+
 ## Manual directory
 
-1. Set `INITIAL_ADMIN_EMAILS` to your own email address and sign in. While
-   Logbuch has no admin, the first login whose verified email is in that list
-   becomes an admin.
-2. Under **Admin → Teams**, create the teams that own entries.
+1. Set `INITIAL_ADMIN_EMAILS` (required) to your own email address and sign
+   in. While Logbuch has no admin, the first login whose verified email is in
+   that list becomes an admin.
+2. Under **Admin → Teams**, create the teams that own entries. Until there is
+   one, nobody can create entries, and the new-entry page says so.
 3. Under **Admin → People**, invite people with their email address, a name,
    and optionally a team. An invited person gets access at their first login
    with the same verified email address; the name from the provider then
@@ -61,15 +69,22 @@ Anyone else who signs in at the provider sees "No access".
 
 ## Keycloak directory
 
-Logbuch reads the members of Keycloak groups through the Keycloak Admin API:
+Logbuch reads the members of three Keycloak groups through the Keycloak Admin
+API. All three are required:
 
 - Members of `KEYCLOAK_ACCESS_GROUP`, and of its subgroups, have access.
   Disabled users do not.
 - Members of `KEYCLOAK_ADMIN_GROUP` (and its subgroups) are admins, and have
   access too.
-- Each direct subgroup of `KEYCLOAK_TEAMS_GROUP` is a team. A person in
-  several teams belongs to the first one by name. Members of a team's
-  subgroups belong to that team.
+- Each direct subgroup of `KEYCLOAK_TEAMS_GROUP` is a team (the group itself
+  is not). A person in several teams belongs to the first one by name.
+  Members of a team's subgroups belong to that team. Someone in no team
+  chooses one for each entry. Being in a team does not grant access; set
+  `KEYCLOAK_ACCESS_GROUP` to the teams group if every team member should
+  have it.
+- Teams are matched by their Keycloak group ID: renaming a group renames the
+  team, and old entries keep it. A team group that is removed becomes an
+  inactive team, kept on old entries but not offered for new ones.
 
 For example:
 
@@ -84,8 +99,9 @@ For example:
 The worker syncs every 15 minutes and once at startup. An admin can start a
 sync on the admin page. People missing from the groups lose access, and their
 sessions end. A failed sync, or one that would find nobody, keeps the last
-state and shows the error on the admin page. Someone who signs in before the
-next sync triggers a sync of their own (at most once a minute).
+state and shows the error on the admin page; so does a sync that finds no
+team. Someone who signs in before the next sync triggers a sync of their own
+(at most once a minute).
 
 ### Keycloak setup
 

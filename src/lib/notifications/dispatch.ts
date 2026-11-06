@@ -10,9 +10,10 @@ import { DeliveryError, type SlackTransport, type Transports } from "./transport
 /*
  * The worker's sender. It claims one due delivery at a time with
  * FOR UPDATE SKIP LOCKED and holds the lock while sending, so two workers never
- * send the same delivery. A delivery ends as sent, skipped (channel off, no
- * access), or failed after 5 attempts. A Slack message goes by email instead
- * when Slack is off or the recipient has no Slack account.
+ * send the same delivery. A delivery ends as sent, skipped (no channel
+ * reaches the person, no access), or failed after 5 attempts. Events prefer
+ * Slack and reminders prefer email; when the preferred channel is off or
+ * cannot reach the person, the message goes out on the other one.
  */
 
 export const MAX_ATTEMPTS = 5;
@@ -145,26 +146,35 @@ async function send(
   if (!recipient) return new Skip("The recipient no longer exists.");
   if (!recipient.hasAccess) return new Skip("The recipient no longer has access.");
   const formatter = createDateFormatter(displayPreferences(recipient));
-  let slackSkipped: Skip | undefined;
-  if (delivery.channel === "slack") {
-    if (transports.slack) {
-      const userId = await slackUserIdFor(tx, recipient, transports.slack, now);
-      if (!(userId instanceof Skip)) {
-        await transports.slack.postMessage(userId, slackText(delivery.message, transports.baseUrl, formatter));
-        return "slack";
-      }
-      slackSkipped = userId;
-    }
-    // No Slack, or no Slack account: the message goes by email instead.
+
+  async function viaSlack(): Promise<Skip | "slack"> {
+    if (!transports.slack) return new Skip("Slack is not configured.");
+    const userId = await slackUserIdFor(tx, recipient!, transports.slack, now);
+    if (userId instanceof Skip) return userId;
+    await transports.slack.postMessage(userId, slackText(delivery.message, transports.baseUrl, formatter));
+    return "slack";
   }
-  if (!transports.email) return slackSkipped ?? new Skip(transports.slack ? "Email is not configured." : "Neither Slack nor email is configured.");
-  if (!recipient.workEmail) return new Skip("The recipient has no email address.");
-  await transports.email.send({
-    to: recipient.workEmail,
-    toName: recipient.displayName,
-    ...emailContent(delivery.message, recipient.displayName, transports.baseUrl, formatter),
-  });
-  return "email";
+
+  async function viaEmail(): Promise<Skip | "email"> {
+    if (!transports.email) return new Skip("Email is not configured.");
+    if (!recipient!.workEmail) return new Skip("The recipient has no email address.");
+    await transports.email.send({
+      to: recipient!.workEmail,
+      toName: recipient!.displayName,
+      ...emailContent(delivery.message, recipient!.displayName, transports.baseUrl, formatter),
+    });
+    return "email";
+  }
+
+  // The planned channel first, then the other one.
+  const attempts = delivery.channel === "slack" ? [viaSlack, viaEmail] : [viaEmail, viaSlack];
+  const reasons: string[] = [];
+  for (const attempt of attempts) {
+    const result = await attempt();
+    if (!(result instanceof Skip)) return result;
+    reasons.push(result.reason);
+  }
+  return new Skip(reasons.join(" "));
 }
 
 /** Sends due deliveries until none is left or `limit` is reached. */

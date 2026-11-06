@@ -66,6 +66,7 @@ services:
       <<: [*app-environment, *directory-environment]
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?}
       OIDC_SCOPES: ${OIDC_SCOPES:-}
+      OIDC_TRUST_EMAIL: ${OIDC_TRUST_EMAIL:-}
     healthcheck:
       # Readiness: database reachable and migrations applied.
       test:

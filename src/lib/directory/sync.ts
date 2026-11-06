@@ -43,7 +43,8 @@ const SYNC_LOCK_KEY = 7_261_001;
  *   the directory.
  * - People missing from the snapshot lose access and their sessions end.
  *   Their rows stay: Logbuch never deletes people.
- * - A failed fetch, or a snapshot without people, keeps the last projection.
+ * - A failed fetch, or a snapshot without people or teams, keeps the last
+ *   projection.
  */
 export async function syncDirectory(options: SyncOptions): Promise<SyncResult> {
   const now = options.now ?? (() => new Date());
@@ -119,10 +120,15 @@ async function runLocked(client: PoolClient, options: SyncOptions, now: () => Da
   }
 }
 
-/** Rejects snapshots that would remove everyone's access or break uniqueness. */
+/** Rejects snapshots that would remove everyone's access or every team, or break uniqueness. */
 export function assertPlausible(snapshot: DirectorySnapshot): void {
   if (snapshot.people.length === 0) {
     throw new DirectoryError("The directory returned no people. The current access list is kept.");
+  }
+  if (snapshot.teams.length === 0) {
+    throw new DirectoryError(
+      "The directory returned no teams: the teams group has no subgroups. Every entry needs a team, so the current people and teams are kept.",
+    );
   }
   const duplicates = (values: string[]) => values.filter((value, index) => values.indexOf(value) !== index);
   const duplicatePeople = duplicates(snapshot.people.map((p) => p.externalId));

@@ -52,7 +52,11 @@ export function createAuth({ config, directory, db, syncDirectoryNow }: CreateAu
           // The access rule runs before a session exists, so people without
           // access never get one.
           before: async (session) => {
-            const allowed = await hasLoginAccess(db, session.userId, { directory, syncDirectoryNow });
+            const allowed = await hasLoginAccess(db, session.userId, {
+              directory,
+              syncDirectoryNow,
+              trustEmail: config.OIDC_TRUST_EMAIL,
+            });
             if (!allowed) {
               logger.info({ userId: session.userId }, "login denied: no access");
               throw new APIError("FORBIDDEN", {
