@@ -83,6 +83,20 @@ shows tasks in the app.
 
 See [webhook](webhooks.md).
 
+## Error reporting (web, worker)
+
+Optional. With `SENTRY_DSN`, server errors in the web process (pages, Server
+Actions, route handlers) and failures of the worker go to
+[Sentry](https://sentry.io) or a Sentry-compatible service. Only the error and
+its stack trace are sent: no user, cookies, headers, request bodies, query
+strings, or values from database queries. The browser sends nothing.
+
+| Variable | Default | Value |
+|---|---|---|
+| `SENTRY_DSN` | none | The project's DSN (Client Key). Off without it |
+| `SENTRY_ENVIRONMENT` | `production` | Environment name shown in Sentry, e.g. `staging` |
+| `SENTRY_RELEASE` | none | Release name, e.g. the deployed commit SHA |
+
 ## Time zone
 
 Logbuch uses the server's time zone, set with the standard `TZ` variable

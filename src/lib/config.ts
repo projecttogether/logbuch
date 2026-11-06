@@ -159,12 +159,20 @@ const webhookSchema = z
     path: ["WEBHOOK_SECRET"],
   });
 
+/** Error reporting to Sentry: off until SENTRY_DSN is set. */
+const errorReportingSchema = z.object({
+  SENTRY_DSN: optional(httpUrl),
+  SENTRY_ENVIRONMENT: optional(z.string()),
+  SENTRY_RELEASE: optional(z.string()),
+});
+
 export type DatabaseConfig = z.infer<typeof databaseSchema>;
 export type AuthConfig = z.infer<typeof authSchema>;
 export type DirectoryConfig = z.infer<typeof directorySchema>;
 export type KeycloakDirectoryConfig = Extract<DirectoryConfig, { DIRECTORY: "keycloak" }>;
 export type NotificationConfig = z.infer<typeof notificationSchema>;
 export type WebhookConfig = z.infer<typeof webhookSchema>;
+export type ErrorReportingConfig = z.infer<typeof errorReportingSchema>;
 
 export class ConfigError extends Error {
   constructor(issues: z.core.$ZodIssue[]) {
@@ -200,6 +208,10 @@ export function parseWebhookConfig(env: Env = process.env): WebhookConfig {
   return parse(webhookSchema, env);
 }
 
+export function parseErrorReportingConfig(env: Env = process.env): ErrorReportingConfig {
+  return parse(errorReportingSchema, env);
+}
+
 function validate(schemas: readonly z.ZodType[], env: Env): void {
   const issues: z.core.$ZodIssue[] = [];
   const withDefaultValues = withDefaults(env);
@@ -212,12 +224,12 @@ function validate(schemas: readonly z.ZodType[], env: Env): void {
 
 /** Validates every variable the web process needs. Called once at startup. */
 export function validateWebConfig(env: Env = process.env): void {
-  validate([databaseSchema, authSchema, directorySchema], env);
+  validate([databaseSchema, authSchema, directorySchema, errorReportingSchema], env);
 }
 
 /** Validates every variable the worker needs. */
 export function validateWorkerConfig(env: Env = process.env): void {
-  validate([databaseSchema, directorySchema, notificationSchema, webhookSchema], env);
+  validate([databaseSchema, directorySchema, notificationSchema, webhookSchema, errorReportingSchema], env);
 }
 
 let databaseConfig: DatabaseConfig | undefined;
@@ -225,6 +237,7 @@ let authConfig: AuthConfig | undefined;
 let directoryConfig: DirectoryConfig | undefined;
 let notificationConfig: NotificationConfig | undefined;
 let webhookConfig: WebhookConfig | undefined;
+let errorReportingConfig: ErrorReportingConfig | undefined;
 
 export function getDatabaseConfig(): DatabaseConfig {
   databaseConfig ??= parseDatabaseConfig();
@@ -249,4 +262,9 @@ export function getNotificationConfig(): NotificationConfig {
 export function getWebhookConfig(): WebhookConfig {
   webhookConfig ??= parseWebhookConfig();
   return webhookConfig;
+}
+
+export function getErrorReportingConfig(): ErrorReportingConfig {
+  errorReportingConfig ??= parseErrorReportingConfig();
+  return errorReportingConfig;
 }

@@ -1,8 +1,17 @@
 import { hostname } from "node:os";
+import * as Sentry from "@sentry/node";
 import { PgBoss } from "pg-boss";
-import { getDatabaseConfig, getDirectoryConfig, getNotificationConfig, getWebhookConfig, validateWorkerConfig } from "@/lib/config";
+import {
+  getDatabaseConfig,
+  getDirectoryConfig,
+  getErrorReportingConfig,
+  getNotificationConfig,
+  getWebhookConfig,
+  validateWorkerConfig,
+} from "@/lib/config";
 import { getDb, getPool } from "@/lib/db/client";
 import { envValue } from "@/lib/env";
+import { asError, sentryOptions } from "@/lib/error-reporting";
 import { runDirectorySync } from "@/lib/directory/service";
 import type { SyncTrigger } from "@/lib/directory/sync";
 import { SERVER_TIME_ZONE } from "@/lib/format";
@@ -26,11 +35,17 @@ interface DirectorySyncJob {
 
 async function main() {
   validateWorkerConfig();
+  const sentry = sentryOptions(getErrorReportingConfig(), "worker");
+  // The bundle has no node_modules to hook into at load time.
+  if (sentry) Sentry.init({ ...sentry, enableRuntimeChannelInjection: false });
   const boss = new PgBoss({
     connectionString: getDatabaseConfig().DATABASE_URL,
     application_name: "logbuch-worker-pgboss",
   });
-  boss.on("error", (error) => logger.error({ err: error }, "pg-boss error"));
+  boss.on("error", (error) => {
+    logger.error({ err: error }, "pg-boss error");
+    Sentry.captureException(asError(error));
+  });
   await boss.start();
 
   // The Keycloak directory syncs every 15 minutes and once at startup, so a
@@ -103,7 +118,9 @@ async function main() {
   process.on("SIGINT", () => void shutdown("SIGINT"));
 }
 
-main().catch((error: unknown) => {
+main().catch(async (error: unknown) => {
   logger.fatal({ err: error }, "worker failed to start");
+  Sentry.captureException(error);
+  await Sentry.flush(2_000);
   process.exit(1);
 });
