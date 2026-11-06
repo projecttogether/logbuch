@@ -23,7 +23,11 @@ const keycloakDirectory = {
   OIDC_CLIENT_ID: "logbuch",
   OIDC_CLIENT_SECRET: "secret",
   KEYCLOAK_ACCESS_GROUP: "/logbuch",
+  KEYCLOAK_ADMIN_GROUP: "/logbuch-admins",
+  KEYCLOAK_TEAMS_GROUP: "/teams",
 };
+
+const manualDirectory = { INITIAL_ADMIN_EMAILS: "owner@example.org" };
 
 describe("parseAuthConfig", () => {
   it("strips trailing slashes from URLs and defaults the scopes", () => {
@@ -47,11 +51,19 @@ describe("parseAuthConfig", () => {
   it("has no default identity provider", () => {
     expect(() => parseAuthConfig({ ...auth, OIDC_ISSUER: undefined })).toThrow(/OIDC_ISSUER/);
   });
+
+  it("trusts the provider's email addresses only when told to", () => {
+    expect(parseAuthConfig(auth).OIDC_TRUST_EMAIL).toBe(false);
+    expect(parseAuthConfig({ ...auth, OIDC_TRUST_EMAIL: "true" }).OIDC_TRUST_EMAIL).toBe(true);
+    expect(parseAuthConfig({ ...auth, OIDC_TRUST_EMAIL: " " }).OIDC_TRUST_EMAIL).toBe(false);
+    expect(() => parseAuthConfig({ ...auth, OIDC_TRUST_EMAIL: "yes" })).toThrow(/OIDC_TRUST_EMAIL/);
+  });
 });
 
 describe("parseDirectoryConfig", () => {
-  it("is manual by default, with an optional list of first admins", () => {
-    expect(parseDirectoryConfig({})).toEqual({ DIRECTORY: "manual", INITIAL_ADMIN_EMAILS: [] });
+  it("is manual by default and needs the first admins, or nobody could ever get in", () => {
+    expect(() => parseDirectoryConfig({})).toThrow(/INITIAL_ADMIN_EMAILS: is required with DIRECTORY=manual/);
+    expect(() => parseDirectoryConfig({ INITIAL_ADMIN_EMAILS: " , " })).toThrow(/INITIAL_ADMIN_EMAILS/);
     expect(parseDirectoryConfig({ INITIAL_ADMIN_EMAILS: "Ada@Example.org, bob@example.org;carl@example.org" })).toEqual({
       DIRECTORY: "manual",
       INITIAL_ADMIN_EMAILS: ["ada@example.org", "bob@example.org", "carl@example.org"],
@@ -71,10 +83,13 @@ describe("parseDirectoryConfig", () => {
     ).toMatchObject({ KEYCLOAK_CLIENT_ID: "logbuch-directory", KEYCLOAK_CLIENT_SECRET: "other" });
   });
 
-  it("requires a Keycloak realm URL and group paths", () => {
+  it("requires a Keycloak realm URL and all three group paths", () => {
     expect(() => parseDirectoryConfig({ ...keycloakDirectory, OIDC_ISSUER: "https://accounts.example.org" })).toThrow(/realms/);
-    expect(() => parseDirectoryConfig({ ...keycloakDirectory, KEYCLOAK_ACCESS_GROUP: "" })).toThrow(/KEYCLOAK_ACCESS_GROUP/);
+    for (const name of ["KEYCLOAK_ACCESS_GROUP", "KEYCLOAK_ADMIN_GROUP", "KEYCLOAK_TEAMS_GROUP"]) {
+      expect(() => parseDirectoryConfig({ ...keycloakDirectory, [name]: "" }), name).toThrow(name);
+    }
     expect(() => parseDirectoryConfig({ ...keycloakDirectory, KEYCLOAK_ACCESS_GROUP: "logbuch" })).toThrow(/group path/);
+    expect(() => parseDirectoryConfig({ ...keycloakDirectory, KEYCLOAK_TEAMS_GROUP: "/org/teams/" })).toThrow(/group path/);
     expect(parseDirectoryConfig({ ...keycloakDirectory, KEYCLOAK_TEAMS_GROUP: "/org/teams" })).toMatchObject({
       KEYCLOAK_TEAMS_GROUP: "/org/teams",
     });
@@ -95,14 +110,16 @@ describe("validateWebConfig", () => {
     }
     expect(error).toBeInstanceOf(ConfigError);
     const message = (error as Error).message;
-    for (const name of ["DATABASE_URL", "LOGBUCH_BASE_URL", "BETTER_AUTH_SECRET", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET"]) {
+    for (const name of ["DATABASE_URL", "LOGBUCH_BASE_URL", "BETTER_AUTH_SECRET", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "INITIAL_ADMIN_EMAILS"]) {
       expect(message).toContain(name);
     }
     expect(message).not.toContain("KEYCLOAK");
+    expect(message).toContain("- OIDC_ISSUER: is required");
+    expect(message).not.toContain("received undefined");
   });
 
   it("passes with a complete configuration", () => {
-    expect(() => validateWebConfig({ DATABASE_URL: "postgres://u:p@db:5432/logbuch", ...auth })).not.toThrow();
+    expect(() => validateWebConfig({ DATABASE_URL: "postgres://u:p@db:5432/logbuch", ...auth, ...manualDirectory })).not.toThrow();
     expect(() => validateWebConfig({ DATABASE_URL: "postgres://u:p@db:5432/logbuch", ...auth, ...keycloakDirectory })).not.toThrow();
   });
 });
@@ -152,8 +169,10 @@ describe("parseNotificationConfig", () => {
 
 describe("validateWorkerConfig", () => {
   it("needs the base URL for links in messages", () => {
-    expect(() => validateWorkerConfig({ DATABASE_URL: "postgres://u:p@db:5432/logbuch" })).toThrow(/LOGBUCH_BASE_URL/);
-    expect(() => validateWorkerConfig({ DATABASE_URL: "postgres://u:p@db:5432/logbuch", LOGBUCH_BASE_URL: "https://logbuch.example.org" })).not.toThrow();
+    expect(() => validateWorkerConfig({ DATABASE_URL: "postgres://u:p@db:5432/logbuch", ...manualDirectory })).toThrow(/LOGBUCH_BASE_URL/);
+    expect(() =>
+      validateWorkerConfig({ DATABASE_URL: "postgres://u:p@db:5432/logbuch", LOGBUCH_BASE_URL: "https://logbuch.example.org", ...manualDirectory }),
+    ).not.toThrow();
   });
 });
 

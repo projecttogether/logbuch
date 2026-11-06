@@ -17,6 +17,12 @@ test("the first admin comes from INITIAL_ADMIN_EMAILS", async ({ page }) => {
   await expect(adam).toContainText("Active");
   await expect(adam).toContainText("Admin");
   await expectAccessible(page);
+
+  // Every entry needs a team: until there is one, the admin is sent to create it.
+  await page.goto("/new");
+  await expect(page.getByText("No teams yet")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Admin → Teams" })).toHaveAttribute("href", "/admin/teams");
+  await expectAccessible(page);
 });
 
 test("someone who was not invited is denied", async ({ page }) => {

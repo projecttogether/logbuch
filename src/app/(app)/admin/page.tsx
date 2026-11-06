@@ -153,9 +153,9 @@ export default async function AdminPage() {
             <h2>Notifications</h2>
           </CardTitle>
           <CardDescription>
-            Events go to people as Slack direct messages, or by email when Slack is off or a person has no Slack account.
-            Reminders go by email. Each new entry is posted to the Slack channel with its summary, impact, and affected
-            teams. Each message goes out once.
+            Events go to people as Slack direct messages, reminders by email. When one channel is off or cannot reach a
+            person, the message goes out on the other. Each new entry is posted to the Slack channel with its summary,
+            impact, and affected teams. Each message goes out once.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
@@ -345,9 +345,7 @@ export default async function AdminPage() {
           </CardTitle>
           <CardDescription>
             {keycloak
-              ? keycloak.KEYCLOAK_ADMIN_GROUP
-                ? `Members of ${keycloak.KEYCLOAK_ADMIN_GROUP} in Keycloak are admins. Change them in Keycloak.`
-                : "Set KEYCLOAK_ADMIN_GROUP to choose admins in Keycloak."
+              ? `Members of ${keycloak.KEYCLOAK_ADMIN_GROUP} in Keycloak are admins. Change them in Keycloak.`
               : "Admins manage people, teams, tags, and the default periods. Change them on the People page."}
           </CardDescription>
         </CardHeader>

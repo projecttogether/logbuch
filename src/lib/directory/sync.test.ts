@@ -21,6 +21,10 @@ describe("assertPlausible", () => {
     ).toThrow(/duplicate/);
   });
 
+  it("rejects a response without teams, since every entry needs one", () => {
+    expect(() => assertPlausible(snapshot([directoryPerson({ externalId: "p1" })], []))).toThrow(/no teams/);
+  });
+
   it("accepts a normal response", () => {
     expect(() => assertPlausible(snapshot([directoryPerson({ externalId: "p1" })]))).not.toThrow();
   });

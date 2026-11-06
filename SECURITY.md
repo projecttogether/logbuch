@@ -21,5 +21,7 @@ Security fixes go into the latest release and the `main` branch.
 - Serve Logbuch over HTTPS only, and set `LOGBUCH_BASE_URL` to that HTTPS URL.
 - The Keycloak service account needs only the `view-users` role of
   `realm-management`.
+- Set `OIDC_TRUST_EMAIL=true` only if people cannot choose their own email
+  address at your identity provider.
 - Use a long, random `WEBHOOK_SECRET`, and verify the signature on every
   request your receiver gets (see [docs/webhooks.md](docs/webhooks.md)).

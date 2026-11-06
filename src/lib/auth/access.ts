@@ -18,6 +18,8 @@ export interface LoginAccessOptions {
   directory: DirectoryConfig;
   /** Runs a directory sync now (Keycloak directory). */
   syncDirectoryNow: () => Promise<unknown>;
+  /** Treat the provider's email addresses as verified (OIDC_TRUST_EMAIL). */
+  trustEmail?: boolean;
   now?: Date;
 }
 
@@ -30,7 +32,8 @@ export interface LoginAccessOptions {
  * - Manual directory: at the first login, an invitation whose email matches
  *   the user's verified email is linked to the `sub`. While nobody is an admin
  *   yet, a verified email in INITIAL_ADMIN_EMAILS becomes the first admin.
- *   Afterwards the person is matched by `sub` only.
+ *   Afterwards the person is matched by `sub` only. With `trustEmail`, every
+ *   email from the provider counts as verified.
  */
 export async function hasLoginAccess(db: Database, userId: string, options: LoginAccessOptions): Promise<boolean> {
   const subject = await findSubjectForUser(db, userId);
@@ -44,16 +47,25 @@ export async function hasLoginAccess(db: Database, userId: string, options: Logi
     return (await findPersonBySubject(db, subject))?.hasAccess === true;
   }
   if (known) return false;
-  return linkFirstLogin(db, userId, subject, options.directory.INITIAL_ADMIN_EMAILS, options.now ?? new Date());
+  return linkFirstLogin(db, userId, subject, {
+    initialAdmins: options.directory.INITIAL_ADMIN_EMAILS,
+    trustEmail: options.trustEmail ?? false,
+    now: options.now ?? new Date(),
+  });
 }
 
-async function linkFirstLogin(db: Database, userId: string, subject: string, initialAdmins: string[], now: Date): Promise<boolean> {
+async function linkFirstLogin(
+  db: Database,
+  userId: string,
+  subject: string,
+  { initialAdmins, trustEmail, now }: { initialAdmins: string[]; trustEmail: boolean; now: Date },
+): Promise<boolean> {
   const [user] = await db
     .select({ name: authUser.name, email: authUser.email, emailVerified: authUser.emailVerified })
     .from(authUser)
     .where(eq(authUser.id, userId));
   // Only an email the identity provider verified may claim an invitation.
-  if (!user?.emailVerified || !user.email) return false;
+  if (!user?.email || !(user.emailVerified || trustEmail)) return false;
   const email = user.email.trim().toLowerCase();
   const name = user.name.trim();
 

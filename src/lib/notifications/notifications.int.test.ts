@@ -325,7 +325,11 @@ describe("the worker's sender", () => {
     const fake = fakeTransports({ slackUsers: users, email: false });
     expect(await dispatchDue(db, fake.transports, () => WEDNESDAY)).toEqual({ sent: 3, skipped: 1, retry: 0, failed: 0 });
     const toEve = (await deliveries()).find((d) => d.recipientId === eve.personId);
-    expect(toEve).toMatchObject({ status: "skipped", channel: "slack", lastError: "No Slack account was found for this person's work email." });
+    expect(toEve).toMatchObject({
+      status: "skipped",
+      channel: "slack",
+      lastError: "No Slack account was found for this person's work email. Email is not configured.",
+    });
   });
 
   it("emails event messages when Slack is off", async () => {
@@ -337,7 +341,7 @@ describe("the worker's sender", () => {
     expect(fake.emails[0]!.text).toContain("Feedback deadline: Friday, 06.11.2026, 23:59 (Europe/Amsterdam)");
   });
 
-  it("sends reminder emails, or skips them when email is off", async () => {
+  it("sends reminders by email, by Slack when email is off, or skips them when neither reaches the person", async () => {
     await submitted();
     await recordReminders(db, at("2026-11-05T08:00:00Z"));
     const on = fakeTransports({ slackUsers: users });
@@ -346,13 +350,14 @@ describe("the worker's sender", () => {
     expect(reminders.map((e) => e.to).sort()).toEqual(["amy@example.org", "eve@example.org"]);
     expect(reminders[0]!.subject).toMatch(/^Reminder: feedback due: LB-\d+ Four-day week$/);
 
-    await db.update(notificationDelivery).set({ status: "pending", sentAt: null }).where(eq(notificationDelivery.channel, "email"));
-    const off = fakeTransports({ email: false });
-    await dispatchDue(db, off.transports, () => at("2026-11-05T09:00:00Z"));
-    expect((await deliveries("reminder.deadline")).map((d) => [d.status, d.lastError])).toEqual([
-      ["skipped", "Email is not configured."],
-      ["skipped", "Email is not configured."],
+    await db.update(notificationDelivery).set({ status: "pending", sentAt: null }).where(eq(notificationDelivery.event, "reminder.deadline"));
+    const slackOnly = fakeTransports({ email: false, slackUsers: users });
+    await dispatchDue(db, slackOnly.transports, () => at("2026-11-05T09:00:00Z"));
+    expect((await deliveries("reminder.deadline")).map((d) => [d.recipientId, d.status, d.channel, d.lastError])).toEqual([
+      [amy.personId, "sent", "slack", null],
+      [eve.personId, "skipped", "email", "Email is not configured. No Slack account was found for this person's work email."],
     ]);
+    expect(slackOnly.slackMessages.map((m) => m.userId)).toContain("U_AMY");
   });
 
   it("retries with backoff and gives up after 5 attempts", async () => {

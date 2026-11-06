@@ -14,7 +14,9 @@ type Env = Record<string, string | undefined>;
 const blankAsUndefined = (value: unknown) =>
   typeof value === "string" && value.trim() === "" ? undefined : value;
 
-const required = <T extends z.ZodType>(schema: T) => z.preprocess(blankAsUndefined, schema);
+/** A variable that must be set; when it is not, the error says so instead of naming types. */
+const required = <T extends z.ZodType>(schema: T) =>
+  z.preprocess(blankAsUndefined, z.any().refine((value) => value !== undefined, { message: "is required", abort: true }).pipe(schema));
 const requiredString = () => required(z.string().min(1));
 const optional = <T extends z.ZodType>(schema: T) => z.preprocess(blankAsUndefined, schema.optional());
 
@@ -38,6 +40,12 @@ const emailList = z.preprocess(
       : [],
   z.array(z.email()),
 );
+
+/** "true" or "false"; unset means `fallback`. */
+const flag = (fallback: boolean) =>
+  z.preprocess(blankAsUndefined, z.enum(["true", "false"], { error: 'must be "true" or "false"' }).optional()).transform((value) =>
+    value === undefined ? fallback : value === "true",
+  );
 
 /**
  * Fills in defaults for unset or blank variables. The Keycloak directory uses
@@ -70,6 +78,12 @@ const authSchema = z
     OIDC_CLIENT_ID: requiredString(),
     OIDC_CLIENT_SECRET: requiredString(),
     OIDC_SCOPES: requiredString(),
+    /**
+     * Treat every email address from the provider as verified. Only for
+     * providers that do not send `email_verified` (e.g. Microsoft Entra ID)
+     * and whose users cannot choose their own address.
+     */
+    OIDC_TRUST_EMAIL: flag(false),
   })
   .refine((env) => env.NODE_ENV !== "production" || env.BETTER_AUTH_SECRET !== EXAMPLE_SECRET, {
     message: "is the example value from .env.example; generate one with `openssl rand -base64 32`",
@@ -80,15 +94,19 @@ const authSchema = z
 /**
  * Where people, teams, and access come from:
  *
- * - `manual`: admins invite people and manage teams in Logbuch. The first
- *   admins are the people in INITIAL_ADMIN_EMAILS.
+ * - `manual`: admins invite people and manage teams in Logbuch. While there
+ *   is no admin, the first login with an address in INITIAL_ADMIN_EMAILS
+ *   becomes one; without that list nobody could ever get in.
  * - `keycloak`: a sync reads the members of Keycloak groups through the
- *   Keycloak Admin API.
+ *   Keycloak Admin API. Every entry belongs to a team, and teams, tags, and
+ *   stuck proposals need admins, so all three groups are required.
  */
 const directorySchema = z.discriminatedUnion("DIRECTORY", [
   z.object({
     DIRECTORY: z.literal("manual"),
-    INITIAL_ADMIN_EMAILS: emailList,
+    INITIAL_ADMIN_EMAILS: emailList.refine((emails) => emails.length > 0, {
+      message: "is required with DIRECTORY=manual: list the email addresses of the first admins",
+    }),
   }),
   z.object({
     DIRECTORY: z.literal("keycloak"),
@@ -100,8 +118,8 @@ const directorySchema = z.discriminatedUnion("DIRECTORY", [
     KEYCLOAK_CLIENT_ID: requiredString(),
     KEYCLOAK_CLIENT_SECRET: requiredString(),
     KEYCLOAK_ACCESS_GROUP: required(groupPath),
-    KEYCLOAK_ADMIN_GROUP: optional(groupPath),
-    KEYCLOAK_TEAMS_GROUP: optional(groupPath),
+    KEYCLOAK_ADMIN_GROUP: required(groupPath),
+    KEYCLOAK_TEAMS_GROUP: required(groupPath),
   }),
 ]);
 

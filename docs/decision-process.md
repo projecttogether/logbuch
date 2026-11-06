@@ -94,10 +94,10 @@ the server's time zone.
 ## Notifications
 
 Process events (feedback requested, an objection raised, ready to decide, and
-so on) go to the people involved as Slack direct messages, or by email when
-Slack is not set up or a person has no Slack account. Reminders go by email
-at 09:00 on working days: before a deadline, when the objection round has not
-been started, when a one-way decision is blocked, when a decision is ready
-but not published, and on review dates. Nobody is told about their own
-actions, and messages never contain the proposal text. Every person also sees
-what is waiting for them under **My tasks**.
+so on) go to the people involved as Slack direct messages. Reminders go by
+email at 09:00 on working days: before a deadline, when the objection round
+has not been started, when a one-way decision is blocked, when a decision is
+ready but not published, and on review dates. When one channel is not set up
+or cannot reach a person, the message goes out on the other. Nobody is told
+about their own actions, and messages never contain the proposal text. Every
+person also sees what is waiting for them under **My tasks**.

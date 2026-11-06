@@ -1,9 +1,13 @@
 import { ChevronRight, MessagesSquare, NotebookPen } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { NoTeamsNotice } from "@/components/entries/no-teams-notice";
 import { PageHeader } from "@/components/page-header";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { requireUser } from "@/lib/auth/session";
+import { getDirectoryConfig } from "@/lib/config";
+import { getDb } from "@/lib/db/client";
+import { hasActiveTeam } from "@/lib/directory/queries";
 
 export const metadata: Metadata = { title: "New entry" };
 
@@ -25,7 +29,15 @@ const choices = [
 
 /** Two ways to create an entry. */
 export default async function NewEntryPage() {
-  await requireUser();
+  const { person } = await requireUser();
+  if (!(await hasActiveTeam(getDb()))) {
+    return (
+      <div className="flex max-w-3xl flex-col gap-6">
+        <PageHeader title="New entry" description="Log what already happened, or ask for a decision." />
+        <NoTeamsNotice isAdmin={person.isAdmin} manual={getDirectoryConfig().DIRECTORY === "manual"} />
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title="New entry" description="Log what already happened, or ask for a decision." />
