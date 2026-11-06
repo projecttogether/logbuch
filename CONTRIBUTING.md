@@ -1,8 +1,7 @@
 # Contributing
 
 Thank you for helping with Logbuch. Bug reports, ideas, and pull requests are
-welcome. For larger changes, please open an issue first, so we can agree on
-the approach before you write the code.
+welcome.
 
 ## Development setup
 
