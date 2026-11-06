@@ -58,3 +58,9 @@ directory instead.
 Next.js 16 (App Router, Server Actions), TypeScript, PostgreSQL 18 with
 Drizzle ORM, Better Auth, pg-boss, Tailwind CSS with shadcn/ui, Vitest, and
 Playwright.
+
+## License
+
+Copyright 2026 ProjectTogether gGmbH
+
+Licensed under the [Apache License 2.0](LICENSE).
