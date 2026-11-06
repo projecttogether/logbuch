@@ -14,25 +14,44 @@ the `pgboss` schema of the same database.
 
 ## Docker Compose
 
-[`compose.yaml`](../compose.yaml) runs PostgreSQL, `migrate`, `web`, and
-`worker`:
+[`compose.yaml`](../compose.yaml) runs `migrate`, `web`, and `worker`
+against the PostgreSQL in `DATABASE_URL`:
 
 ```sh
 cp .env.example .env
 # Edit .env with the production values (docs/configuration.md): at least
-# POSTGRES_PASSWORD, LOGBUCH_BASE_URL, BETTER_AUTH_SECRET, the OIDC_* variables,
-# and DIRECTORY with its settings. Remove DATABASE_URL (compose.yaml sets
-# it) and NOTIFICATION_TRANSPORT (production sends for real).
+# DATABASE_URL, LOGBUCH_BASE_URL, BETTER_AUTH_SECRET, the OIDC_* variables,
+# and DIRECTORY with its settings. Remove NOTIFICATION_TRANSPORT (production
+# sends for real).
 docker compose up -d --build
 ```
 
+On a platform that runs Compose files, create the PostgreSQL there and set
+`DATABASE_URL` to its internal URL.
+
 Put a reverse proxy that terminates TLS in front of `web` and use its public
 URL as `LOGBUCH_BASE_URL`. Use exactly that URL: login redirects and links in
-messages are built from it. With an external database, change `DATABASE_URL`
-in `compose.yaml` and remove the `postgres` service.
+messages are built from it.
 
 Set `TZ` to your organization's time zone (default UTC): deadlines end at
 23:59, and reminders go out at 09:00, in that zone.
+
+### PostgreSQL next to Logbuch
+
+On a server without a PostgreSQL of its own,
+[`compose.postgres.yaml`](../compose.postgres.yaml) adds one to the Compose
+project and keeps its data in the `postgres-data` volume. Set these values in
+`.env`; `COMPOSE_FILE` makes every `docker compose` command use both files:
+
+```sh
+COMPOSE_FILE=compose.yaml:compose.postgres.yaml
+# openssl rand -hex 32: no characters that would need escaping in the URL
+POSTGRES_PASSWORD=<password>
+DATABASE_URL=postgres://logbuch:<password>@postgres:5432/logbuch
+```
+
+PostgreSQL takes the password once, when it creates the database at the first
+start. Changing `POSTGRES_PASSWORD` later does not change it.
 
 ## Health checks
 
