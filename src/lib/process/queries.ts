@@ -6,34 +6,20 @@ import {
   awaitsAnswer,
   blockingObjections,
   canStartObjectionRound,
-  hasAnswered,
-  hasGivenFeedback,
-  hasGoOnCurrentVersion,
+  deciderChange,
   isConsentGiver,
+  isConsentingGo,
   objectionHandlingRequired,
+  objectionResolution,
   openObjections,
   openQuestions,
+  participantRemoval,
+  participantState,
   permissions,
   readiness,
   type Actor,
-  type ProposalSnapshot,
 } from "./rules";
 import { loadProposal } from "./snapshot";
-
-export type ParticipantState = "waiting" | "feedback_given" | "go" | "go_older_version" | "objection" | "no_access";
-
-function participantState(s: ProposalSnapshot, personId: string, hasAccess: boolean): ParticipantState {
-  if (!hasAccess) return "no_access";
-  if (s.status === "feedback" || s.status === "draft") return hasGivenFeedback(s, personId) ? "feedback_given" : "waiting";
-  if (openObjections(s).some((r) => r.personId === personId)) return "objection";
-  if (s.reversibility === "one_way" && isConsentGiver(s, personId)) {
-    if (hasGoOnCurrentVersion(s, personId)) return "go";
-    const older = s.responses.some((r) => r.personId === personId && r.kind === "go" && r.withdrawnAt === null);
-    return older ? "go_older_version" : "waiting";
-  }
-  if (s.responses.some((r) => r.personId === personId && r.kind === "go" && r.withdrawnAt === null)) return "go";
-  return hasAnswered(s, personId) ? "objection" : "waiting";
-}
 
 /** Everything the proposal page shows, for one viewer. */
 export async function getProposalView(db: Database, entryId: string, viewer: Actor, now = new Date()) {
@@ -118,6 +104,7 @@ export async function getProposalView(db: Database, entryId: string, viewer: Act
       role: p.role,
       hasAccess: p.hasAccess,
       state: participantState(s, p.personId, p.hasAccess),
+      removal: participantRemoval(s, viewer, now, p),
     })),
     questions: withNames
       .filter((r) => r.kind === "question")
@@ -125,14 +112,12 @@ export async function getProposalView(db: Database, entryId: string, viewer: Act
     feedback: withNames.filter((r) => r.kind === "feedback"),
     objections: withNames
       .filter((r) => r.kind === "objection")
-      .map((o) => ({ ...o, open: open.has(o.id), blocking: blocking.has(o.id), mine: o.personId === viewer.personId })),
+      .map((o) => ({ ...o, open: open.has(o.id), blocking: blocking.has(o.id), mayResolve: objectionResolution(s, viewer, o.id).ok })),
     gos: withNames
       .filter((r) => r.kind === "go")
-      .map((g) => ({
-        ...g,
-        current: g.versionNumber === s.currentVersion && g.withdrawnAt === null && (s.goResetAt === null || g.createdAt > s.goResetAt),
-      })),
+      .map((g) => ({ ...g, current: isConsentingGo(s, g) })),
     permissions: permissions(s, viewer, now),
+    deciderChange: deciderChange(s, viewer),
     readiness: readiness(s, now),
     objectionHandlingRequired: objectionHandlingRequired(s),
     submissionErrors: errors as Record<string, string>,

@@ -43,7 +43,8 @@ import type { EntryDetail } from "@/lib/entries/queries";
 import { entryPath, formatEntryRef } from "@/lib/entries/refs";
 import { getFormatter } from "@/lib/auth/session";
 import { clipText, DEADLINE_END } from "@/lib/format";
-import type { ParticipantState, ProposalView } from "@/lib/process/queries";
+import type { ProposalView } from "@/lib/process/queries";
+import { MINIMUM_PERIODS, type ParticipantState } from "@/lib/process/rules";
 import { cn } from "@/lib/utils";
 import { PROPOSAL_BADGES, STATUS_LABELS } from "./labels";
 
@@ -217,7 +218,7 @@ export async function ProposalPage({ entry, view, people, viewerId, mayAddAddend
 
       {open ? <NextSteps view={view} people={people} bind={bind} /> : null}
 
-      {view.status !== "draft" ? <Threads view={view} bind={bind} viewerId={viewerId} /> : null}
+      {view.status !== "draft" ? <Threads view={view} bind={bind} /> : null}
 
       {open && (p.withdraw || p.reject) ? (
         <section aria-labelledby="close" className="flex flex-col gap-3 border-t pt-6">
@@ -346,9 +347,6 @@ function PeopleSection({ view, people, bind }: { view: ProposalView; people: Pic
   const p = view.permissions;
   const consent = view.participants.filter((x) => x.role === "consent_giver");
   const feedback = view.participants.filter((x) => x.role === "feedback_giver");
-  const reasonNeeded = p.removeConsentGiverInObjectionRound || (p.adminOverride && !p.manageParticipants);
-  const removable = (role: string) =>
-    role === "feedback_giver" ? p.manageParticipants || p.adminOverride : (p.manageParticipants && view.status === "feedback") || p.removeConsentGiverInObjectionRound || p.adminOverride;
 
   const list = (title: string, rows: ProposalView["participants"]) => (
     <div className="flex flex-col gap-2">
@@ -364,7 +362,8 @@ function PeopleSection({ view, people, bind }: { view: ProposalView; people: Pic
               </Badge>
             </ItemContent>
           );
-          if (!removable(row.role)) {
+          const replaceable = p.adminOverride && row.role === "consent_giver";
+          if (!row.removal.ok && !replaceable) {
             return (
               <Item key={`${row.role}-${row.personId}`} asChild variant="outline" size="sm">
                 <li>{person}</li>
@@ -379,18 +378,27 @@ function PeopleSection({ view, people, bind }: { view: ProposalView; people: Pic
                   <ItemActions>
                     <CollapsibleTrigger asChild>
                       <Button type="button" variant="ghost" size="xs" className="[&[data-state=open]>svg]:rotate-180">
-                        Remove
+                        {row.removal.ok ? "Remove" : "Replace"}
                         <ChevronDown className="transition-transform" aria-hidden="true" />
                       </Button>
                     </CollapsibleTrigger>
                   </ItemActions>
                   <CollapsibleContent className="flex basis-full flex-col gap-3 border-t pt-3">
-                    <ActionForm action={bind(removeParticipantAction)} submitLabel={`Remove ${row.name}`} variant="outline">
-                      <input type="hidden" name="personId" value={row.personId} />
-                      <input type="hidden" name="role" value={row.role} />
-                      <Input name="reason" aria-label={`Reason for removing ${row.name}`} placeholder={reasonNeeded ? "Reason (required)" : "Reason"} required={reasonNeeded && row.role === "consent_giver"} />
-                    </ActionForm>
-                    {p.adminOverride && row.role === "consent_giver" ? (
+                    {row.removal.ok ? (
+                      <ActionForm action={bind(removeParticipantAction)} submitLabel={`Remove ${row.name}`} variant="outline">
+                        <input type="hidden" name="personId" value={row.personId} />
+                        <input type="hidden" name="role" value={row.role} />
+                        <Input
+                          name="reason"
+                          aria-label={`Reason for removing ${row.name}`}
+                          placeholder={row.removal.reasonRequired ? "Reason (required)" : "Reason"}
+                          required={row.removal.reasonRequired}
+                        />
+                      </ActionForm>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">{row.removal.reason}</p>
+                    )}
+                    {replaceable ? (
                       <ActionForm action={bind(replaceConsentGiverAction)} submitLabel={`Replace ${row.name}`} variant="outline">
                         <input type="hidden" name="personId" value={row.personId} />
                         <OptionPicker id={`replace-${row.personId}`} name="replacementId" options={people} placeholder="New consent giver" />
@@ -446,8 +454,8 @@ function PeopleSection({ view, people, bind }: { view: ProposalView; people: Pic
           <ActionForm action={bind(changeDeciderAction)} submitLabel="Change decider" variant="outline">
             <Label htmlFor="new-decider">New decider</Label>
             <OptionPicker id="new-decider" name="deciderId" options={people} placeholder="Choose the decider" />
-            <Label htmlFor="decider-reason">Reason{view.status === "feedback" && !p.adminOverride ? "" : " (required)"}</Label>
-            <Input id="decider-reason" name="reason" />
+            <Label htmlFor="decider-reason">Reason{view.deciderChange.reasonRequired ? " (required)" : ""}</Label>
+            <Input id="decider-reason" name="reason" required={view.deciderChange.reasonRequired} />
           </ActionForm>
         </Disclosure>
       ) : null}
@@ -515,8 +523,8 @@ async function NextSteps({ view, people, bind }: { view: ProposalView; people: P
                 <>
                   <p className="text-sm text-muted-foreground">
                     {view.status === "objection_round"
-                      ? "The proposal returns to the feedback phase with at least 5 working days."
-                      : "The feedback phase lasts at least 5 working days from submission."}
+                      ? `The proposal returns to the feedback phase with at least ${MINIMUM_PERIODS.one_way.feedback} working days.`
+                      : `The feedback phase lasts at least ${MINIMUM_PERIODS.one_way.feedback} working days from submission.`}
                   </p>
                   <Label htmlFor="type-reason">Why one-way</Label>
                   <Textarea id="type-reason" name="reversibilityReason" rows={2} required />
@@ -546,7 +554,7 @@ async function NextSteps({ view, people, bind }: { view: ProposalView; people: P
   );
 }
 
-function Threads({ view, bind, viewerId }: { view: ProposalView; bind: Bind; viewerId: string }) {
+function Threads({ view, bind }: { view: ProposalView; bind: Bind }) {
   const p = view.permissions;
   const kinds = [
     p.ask ? { value: "question", label: "Question" } : null,
@@ -620,7 +628,7 @@ function Threads({ view, bind, viewerId }: { view: ProposalView; bind: Bind; vie
             </div>
             <p className="whitespace-pre-wrap">{objection.text}</p>
             {objection.resolutionNote ? <p className="text-xs text-muted-foreground">Resolved: {objection.resolutionNote}</p> : null}
-            {objection.mine && objection.open && objection.personId === viewerId ? (
+            {objection.open && objection.mayResolve ? (
               <ActionForm action={bind(resolveObjectionAction)} submitLabel="Mark my objection resolved" variant="outline">
                 <input type="hidden" name="responseId" value={objection.id} />
                 <Input name="note" aria-label="How it was resolved" placeholder="How it was resolved (optional)" />

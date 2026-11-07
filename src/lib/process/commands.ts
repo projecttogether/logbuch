@@ -34,14 +34,17 @@ import { notifyProposal, syncReadiness } from "@/lib/notifications/notify";
 import { requestWebhook } from "@/lib/webhooks/sync";
 import {
   MINIMUM_PERIODS,
+  deciderChange,
   defaultFeedbackDeadline,
   isConsentGiver,
   minimumFeedbackDeadline,
   objectionHandlingRequired,
-  openObjections,
+  objectionResolution,
+  participantRemoval,
   permissions,
   readiness,
   type Actor,
+  type Check,
 } from "./rules";
 import type { ChangeReversibilityInput, ProposalDraftInput, PublishInput, ResponseInput, VersionInput } from "./schemas";
 import { getDefaultPeriods } from "./settings";
@@ -80,6 +83,13 @@ async function withProposal<T>(
 
 function allow(allowed: boolean, message: string) {
   if (!allowed) throw forbidden(message);
+}
+
+/** Throws the reason of a failed check: on its input field if it names one, otherwise as forbidden. */
+function enforce(check: Check) {
+  if (check.ok) return;
+  const message = check.reason ?? "This is not possible now.";
+  throw check.field ? invalid(check.field, message) : forbidden(message);
 }
 
 const max = (a: string, b: string) => (a > b ? a : b);
@@ -378,16 +388,12 @@ export async function resolveObjection(
   now = new Date(),
 ) {
   return withProposal(db, actor, entryId, now, async (tx, loaded) => {
-    const objection = loaded.snapshot.responses.find((r) => r.id === input.responseId && r.kind === "objection");
-    if (!objection) throw invalid("responseId", "This objection does not exist.");
-    allow(objection.personId === actor.personId, "Only the person who raised an objection can resolve it.");
-    allow(loaded.snapshot.status === "feedback" || loaded.snapshot.status === "objection_round", "The proposal is closed.");
-    if (objection.resolvedAt || objection.withdrawnAt) throw invalid("responseId", "This objection is already resolved.");
+    enforce(objectionResolution(loaded.snapshot, actor, input.responseId));
     await tx
       .update(response)
       .set({ resolvedAt: now, resolvedById: actor.personId, resolutionNote: input.note ?? null })
-      .where(eq(response.id, objection.id));
-    await recordAudit(tx, { actorId: actor.personId, action: "proposal.objection_resolved", entryId, payload: { responseId: objection.id } });
+      .where(eq(response.id, input.responseId));
+    await recordAudit(tx, { actorId: actor.personId, action: "proposal.objection_resolved", entryId, payload: { responseId: input.responseId } });
   });
 }
 
@@ -541,12 +547,7 @@ export async function addParticipant(
   });
 }
 
-/**
- * Removal rules: the proposer removes people in the
- * feedback phase; a consent giver in the objection round only by the decider
- * with a reason; never while that person has an open objection, except by an
- * admin with a reason. A one-way proposal keeps at least one consent giver.
- */
+/** Removes a listed person, following `participantRemoval` in the rules. */
 export async function removeParticipant(
   db: Database,
   actor: Actor,
@@ -555,26 +556,9 @@ export async function removeParticipant(
   now = new Date(),
 ) {
   return withProposal(db, actor, entryId, now, async (tx, loaded) => {
-    const { snapshot: s } = loaded;
-    const p = permissions(s, actor, now);
-    const listed = s.participants.some((x) => x.personId === input.personId && x.role === input.role);
-    if (!listed) throw invalid("personId", "This person is not listed.");
-
-    if (input.role === "feedback_giver") {
-      allow(p.manageParticipants || p.adminOverride, "The proposer manages participants while the proposal is open.");
-    } else {
-      const byProposer = p.manageParticipants && s.status === "feedback";
-      const byDecider = p.removeConsentGiverInObjectionRound;
-      allow(byProposer || byDecider || p.adminOverride, "In the objection round, only the decider can remove a consent giver.");
-      if ((byDecider || (p.adminOverride && !byProposer)) && !input.reason) throw invalid("reason", "Give a reason.");
-      const hasOpenObjection = openObjections(s).some((r) => r.personId === input.personId);
-      if (hasOpenObjection && !(p.adminOverride && input.reason)) {
-        throw invalid("personId", "This person has an open objection. Only an admin can remove them, with a reason.");
-      }
-      if (s.participants.filter((x) => x.role === "consent_giver").length === 1) {
-        throw invalid("personId", "A one-way proposal needs a consent giver. Add another one first.");
-      }
-    }
+    const check = participantRemoval(loaded.snapshot, actor, now, input);
+    enforce(check);
+    if (check.reasonRequired && !input.reason) throw invalid("reason", "Give a reason.");
     await tx
       .update(participant)
       .set({ removedAt: now, removedById: actor.personId, removalReason: input.reason ?? null })
@@ -627,9 +611,9 @@ export async function replaceConsentGiver(
 export async function changeDecider(db: Database, actor: Actor, entryId: string, input: { deciderId: string; reason?: string }, now = new Date()) {
   return withProposal(db, actor, entryId, now, async (tx, loaded) => {
     const { snapshot: s } = loaded;
-    const byProposer = actor.personId === s.proposerId && s.status === "feedback";
-    allow(permissions(s, actor, now).changeDecider, "The decider cannot be changed now.");
-    if (!byProposer && !input.reason) throw invalid("reason", "Give a reason.");
+    const check = deciderChange(s, actor);
+    enforce(check);
+    if (check.reasonRequired && !input.reason) throw invalid("reason", "Give a reason.");
     if (input.deciderId === s.deciderId) throw invalid("deciderId", "This person is already the decider.");
     await assertPeopleWithAccess(tx, "deciderId", [input.deciderId]);
     // readySince starts again, so a new decider of a ready proposal is told.
