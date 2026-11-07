@@ -2,11 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   blockingObjections,
   canStartObjectionRound,
+  deciderChange,
   minimumFeedbackDeadline,
   objectionHandlingRequired,
+  objectionResolution,
+  participantRemoval,
+  participantState,
   permissions,
   readiness,
+  type ParticipantState,
   type ProposalSnapshot,
+  type ReasonedCheck,
   type SnapshotResponse,
 } from "./rules";
 
@@ -65,6 +71,8 @@ const consentGivers = [
   { personId: ANA, role: "consent_giver" as const, hasAccess: true },
   { personId: BEN, role: "consent_giver" as const, hasAccess: true },
 ];
+
+const actor = (personId: string, isAdmin = false) => ({ personId, isAdmin });
 
 describe("start of the objection round", () => {
   const cases: [string, Partial<ProposalSnapshot>, boolean][] = [
@@ -191,8 +199,6 @@ describe("minimum feedback deadline", () => {
 });
 
 describe("permissions", () => {
-  const actor = (personId: string, isAdmin = false) => ({ personId, isAdmin });
-
   it("let only consent givers give a Go on one-way proposals", () => {
     const s = snapshot({ reversibility: "one_way", participants: consentGivers });
     expect(permissions(s, actor(ANA), NOW).go).toBe(true);
@@ -235,5 +241,77 @@ describe("permissions", () => {
   it("allow nothing on closed proposals", () => {
     const p = permissions(snapshot({ status: "decided" }), actor(PROPOSER), NOW);
     expect(Object.entries(p).filter(([, value]) => value === true)).toEqual([]);
+  });
+});
+
+describe("removing a listed person", () => {
+  const oneWay = (overrides: Partial<ProposalSnapshot> = {}) => snapshot({ reversibility: "one_way", participants: consentGivers, ...overrides });
+  const feedback = { status: "feedback" as const, objectionRoundStartedAt: null, objectionDeadline: null, feedbackDeadline: FUTURE };
+  const objectionByAna = { responses: [response(ANA, "objection")] };
+  const cases: [string, ProposalSnapshot, ReturnType<typeof actor>, { personId: string; role: "consent_giver" | "feedback_giver" }, Partial<ReasonedCheck>][] = [
+    ["the proposer, a feedback giver while open", snapshot({ participants: feedbackGivers }), actor(PROPOSER), { personId: ANA, role: "feedback_giver" }, { ok: true, reasonRequired: false }],
+    ["the proposer, a consent giver in feedback", oneWay(feedback), actor(PROPOSER), { personId: ANA, role: "consent_giver" }, { ok: true, reasonRequired: false }],
+    ["the proposer, the last consent giver", oneWay({ ...feedback, participants: consentGivers.slice(0, 1) }), actor(PROPOSER), { personId: ANA, role: "consent_giver" }, { ok: false, field: "personId" }],
+    ["the proposer, a consent giver in the objection round", oneWay(), actor(PROPOSER), { personId: ANA, role: "consent_giver" }, { ok: false, field: undefined }],
+    ["the decider in the objection round, with a reason", oneWay(), actor(DECIDER), { personId: ANA, role: "consent_giver" }, { ok: true, reasonRequired: true }],
+    ["the decider, a consent giver with an open objection", oneWay(objectionByAna), actor(DECIDER), { personId: ANA, role: "consent_giver" }, { ok: false, field: "personId" }],
+    ["an admin, a consent giver with an open objection, with a reason", oneWay({ ...feedback, ...objectionByAna }), actor(OTHER, true), { personId: ANA, role: "consent_giver" }, { ok: true, reasonRequired: true }],
+    ["an admin who is the proposer, in the objection round, with a reason", oneWay(), actor(PROPOSER, true), { personId: ANA, role: "consent_giver" }, { ok: true, reasonRequired: true }],
+    ["an admin who is the proposer, in feedback, without a reason", oneWay(feedback), actor(PROPOSER, true), { personId: ANA, role: "consent_giver" }, { ok: true, reasonRequired: false }],
+    ["someone else", snapshot({ participants: feedbackGivers }), actor(OTHER), { personId: ANA, role: "feedback_giver" }, { ok: false, field: undefined }],
+    ["nobody once the proposal is closed", snapshot({ status: "decided", participants: feedbackGivers }), actor(PROPOSER), { personId: ANA, role: "feedback_giver" }, { ok: false }],
+    ["nobody who is not listed", snapshot({ participants: feedbackGivers }), actor(PROPOSER), { personId: OTHER, role: "feedback_giver" }, { ok: false, field: "personId" }],
+  ];
+  it.each(cases)("%s", (_, s, who, target, expected) => {
+    // `field: undefined`: refused outright, not because of the input.
+    expect({ field: undefined, ...participantRemoval(s, who, NOW, target) }).toMatchObject(expected);
+  });
+});
+
+describe("resolving an objection", () => {
+  const objection = response(ANA, "objection");
+  it.each([
+    ["by the objector while the proposal is open", snapshot({ responses: [objection] }), ANA, { ok: true }],
+    ["by someone else", snapshot({ responses: [objection] }), BEN, { ok: false, field: undefined }],
+    ["once the proposal is decided", snapshot({ status: "decided", responses: [objection] }), ANA, { ok: false, reason: "The proposal is closed." }],
+    ["twice", snapshot({ responses: [{ ...objection, resolvedAt: NOW }] }), ANA, { ok: false, field: "responseId" }],
+  ] as const)("%s", (_, s, personId, expected) => {
+    expect({ field: undefined, ...objectionResolution(s, actor(personId), objection.id) }).toMatchObject(expected);
+  });
+
+  it("refuses an id that is not an objection", () => {
+    expect(objectionResolution(snapshot({ responses: [objection] }), actor(ANA), "missing")).toMatchObject({ ok: false, field: "responseId" });
+  });
+});
+
+describe("changing the decider", () => {
+  it.each([
+    ["the proposer in feedback, without a reason", "feedback", actor(PROPOSER), { ok: true, reasonRequired: false }],
+    ["an admin who is the proposer, in feedback, without a reason", "feedback", actor(PROPOSER, true), { ok: true, reasonRequired: false }],
+    ["an admin in feedback, with a reason", "feedback", actor(OTHER, true), { ok: true, reasonRequired: true }],
+    ["the proposer in the objection round: not at all", "objection_round", actor(PROPOSER), { ok: false }],
+    ["an admin in the objection round, with a reason", "objection_round", actor(OTHER, true), { ok: true, reasonRequired: true }],
+    ["an admin once the proposal is decided: not at all", "decided", actor(OTHER, true), { ok: false }],
+  ] as const)("%s", (_, status, who, expected) => {
+    expect(deciderChange(snapshot({ status }), who)).toMatchObject(expected);
+  });
+});
+
+describe("participant state", () => {
+  const oneWay = (overrides: Partial<ProposalSnapshot>) => snapshot({ reversibility: "one_way", participants: consentGivers, ...overrides });
+  const resetAt = new Date("2026-11-03T12:00:00Z");
+  const cases: [string, ProposalSnapshot, string, boolean, ParticipantState][] = [
+    ["no access", oneWay({}), ANA, false, "no_access"],
+    ["feedback given", snapshot({ status: "feedback", participants: feedbackGivers, responses: [response(ANA, "feedback")] }), ANA, true, "feedback_given"],
+    ["a Go on the current version", oneWay({ responses: [response(ANA, "go")] }), ANA, true, "go"],
+    ["a Go on an older version", oneWay({ currentVersion: 2, responses: [response(ANA, "go")] }), ANA, true, "go_older_version"],
+    // The Go was given under two-way rules, before the change to one-way.
+    ["a Go from before the change to one-way", oneWay({ goResetAt: resetAt, responses: [response(ANA, "go")] }), ANA, true, "waiting"],
+    ["an open objection", oneWay({ responses: [response(ANA, "objection")] }), ANA, true, "objection"],
+    ["a two-way Go", snapshot({ participants: feedbackGivers, responses: [response(ANA, "go")] }), ANA, true, "go"],
+    ["nothing yet", oneWay({}), BEN, true, "waiting"],
+  ];
+  it.each(cases)("%s", (_, s, personId, hasAccess, expected) => {
+    expect(participantState(s, personId, hasAccess)).toBe(expected);
   });
 });

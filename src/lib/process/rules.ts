@@ -74,10 +74,13 @@ export interface Actor {
 export interface Check {
   ok: boolean;
   reason?: string;
+  /** The input field the reason is about. Without one, the actor may not do this now at all. */
+  field?: string;
 }
 
 const ok: Check = { ok: true };
 const no = (reason: string): Check => ({ ok: false, reason });
+const invalidInput = (field: string, reason: string): Check => ({ ok: false, reason, field });
 
 export function isOpen(status: ProposalStatus): boolean {
   return status === "feedback" || status === "objection_round";
@@ -108,7 +111,7 @@ export function hasAnswered(s: ProposalSnapshot, personId: string): boolean {
 }
 
 /** A Go that counts as consent now: on the current version, not withdrawn, given after any reset. */
-function isConsentingGo(s: ProposalSnapshot, r: SnapshotResponse): boolean {
+export function isConsentingGo(s: ProposalSnapshot, r: SnapshotResponse): boolean {
   return (
     r.kind === "go" &&
     active(r) &&
@@ -175,6 +178,22 @@ export function awaitsAnswer(s: ProposalSnapshot, personId: string): boolean {
     !hasGoOnCurrentVersion(s, personId) &&
     !openObjections(s).some((r) => r.personId === personId)
   );
+}
+
+export type ParticipantState = "waiting" | "feedback_given" | "go" | "go_older_version" | "objection" | "no_access";
+
+/** Where a requested person stands in the current phase, as the list of people shows it. */
+export function participantState(s: ProposalSnapshot, personId: string, hasAccess: boolean): ParticipantState {
+  if (!hasAccess) return "no_access";
+  if (s.status === "feedback" || s.status === "draft") return hasGivenFeedback(s, personId) ? "feedback_given" : "waiting";
+  if (openObjections(s).some((r) => r.personId === personId)) return "objection";
+  if (s.reversibility === "one_way" && isConsentGiver(s, personId)) {
+    if (hasGoOnCurrentVersion(s, personId)) return "go";
+    // A Go given under two-way rules, before the change to one-way, does not count: the person still owes a Go.
+    return hasGoOnEarlierVersion(s, personId) ? "go_older_version" : "waiting";
+  }
+  if (s.responses.some((r) => r.personId === personId && r.kind === "go" && active(r))) return "go";
+  return hasAnswered(s, personId) ? "objection" : "waiting";
 }
 
 // ---------------------------------------------------------------------------
@@ -304,10 +323,74 @@ export function permissions(s: ProposalSnapshot, actor: Actor, now: Date): Permi
     changeReversibility: isProposer && open && (s.reversibility === "two_way" || s.status === "feedback"),
     manageParticipants: isProposer && open,
     removeConsentGiverInObjectionRound: objectionRound && isDecider && s.reversibility === "one_way",
-    changeDecider: (isProposer && s.status === "feedback") || (actor.isAdmin && open),
+    changeDecider: deciderChange(s, actor).ok,
     adminOverride: actor.isAdmin && open,
     publish: isDecider && readiness(s, now).ready,
     reject: isDecider && open,
     withdraw: isProposer && open,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Checks that depend on what the actor wants to change. Commands enforce them;
+// the proposal page asks them what to offer.
+// ---------------------------------------------------------------------------
+
+export interface ReasonedCheck extends Check {
+  /** The actor must say why (only meaningful when `ok`). */
+  reasonRequired: boolean;
+}
+
+/** The proposer changes the decider in the feedback phase; afterwards an admin, with a reason, while the proposal is open. */
+export function deciderChange(s: ProposalSnapshot, actor: Actor): ReasonedCheck {
+  if (actor.personId === s.proposerId && s.status === "feedback") return { ok: true, reasonRequired: false };
+  if (actor.isAdmin && isOpen(s.status)) return { ok: true, reasonRequired: true };
+  return { ...no("The decider cannot be changed now."), reasonRequired: false };
+}
+
+/**
+ * Removing a listed person. The proposer removes feedback givers while the
+ * proposal is open, and consent givers in the feedback phase. In the objection
+ * round only the decider removes a consent giver, with a reason. An admin can
+ * always remove someone, with a reason unless they act as the proposer in the
+ * feedback phase. A consent giver with an open objection is removed only by an
+ * admin, with a reason, and a one-way proposal keeps at least one consent giver.
+ */
+export function participantRemoval(
+  s: ProposalSnapshot,
+  actor: Actor,
+  now: Date,
+  target: { personId: string; role: RequestedRole },
+): ReasonedCheck {
+  const refused = (check: Check): ReasonedCheck => ({ ...check, reasonRequired: false });
+  if (!s.participants.some((x) => x.personId === target.personId && x.role === target.role)) {
+    return refused(invalidInput("personId", "This person is not listed."));
+  }
+  const p = permissions(s, actor, now);
+  if (target.role === "feedback_giver") {
+    if (!p.manageParticipants && !p.adminOverride) return refused(no("The proposer manages participants while the proposal is open."));
+    return { ok: true, reasonRequired: false };
+  }
+
+  const byProposer = p.manageParticipants && s.status === "feedback";
+  const byDecider = p.removeConsentGiverInObjectionRound;
+  if (!byProposer && !byDecider && !p.adminOverride) return refused(no("In the objection round, only the decider can remove a consent giver."));
+  const hasOpenObjection = openObjections(s).some((r) => r.personId === target.personId);
+  if (hasOpenObjection && !p.adminOverride) {
+    return refused(invalidInput("personId", "This person has an open objection. Only an admin can remove them, with a reason."));
+  }
+  if (s.participants.filter((x) => x.role === "consent_giver").length === 1) {
+    return refused(invalidInput("personId", "A one-way proposal needs a consent giver. Add another one first."));
+  }
+  return { ok: true, reasonRequired: byDecider || (p.adminOverride && !byProposer) || hasOpenObjection };
+}
+
+/** The person who raised an objection marks it resolved while the proposal is open. */
+export function objectionResolution(s: ProposalSnapshot, actor: Actor, responseId: string): Check {
+  const objection = s.responses.find((r) => r.id === responseId && r.kind === "objection");
+  if (!objection) return invalidInput("responseId", "This objection does not exist.");
+  if (objection.personId !== actor.personId) return no("Only the person who raised an objection can resolve it.");
+  if (!isOpen(s.status)) return no("The proposal is closed.");
+  if (objection.resolvedAt || objection.withdrawnAt) return invalidInput("responseId", "This objection is already resolved.");
+  return ok;
 }
